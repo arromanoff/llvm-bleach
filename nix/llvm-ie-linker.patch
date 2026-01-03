@@ -1,0 +1,10 @@
+diff --git a/llvm/tools/llvm-snippy/llvm-ie/CMakeLists.txt b/llvm/tools/llvm-snippy/llvm-ie/CMakeLists.txt
+index be817d796407..1a4030079374 100644
+--- a/tools/llvm-snippy/llvm-ie/CMakeLists.txt
++++ b/tools/llvm-snippy/llvm-ie/CMakeLists.txt
+@@ -21,4 +21,5 @@ endforeach()
+ target_link_libraries(llvm-ie PRIVATE
+   LLVMInstructionEnumerator
+   ${LLVM_INSTRUCTION_ENUMERATOR_PLUGINS}
++  LLVMInstructionEnumerator
+   )

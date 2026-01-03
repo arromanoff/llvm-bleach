@@ -11,14 +11,15 @@
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "llvm-snippy";
-  version = "2.0.0";
+  version = "2.1.0";
 
   src = pkgs.fetchFromGitHub {
-    owner = "syntacore";
-    repo = "snippy";
-    rev = "268b59cd505531645651c3feff1143e599c5b7c2";
-    hash = "sha256-A6a8mReDDHdY8JLHSWlK0rwzmALBHohUv/q49UypMc8=";
+    owner = "LLVM-Snippy";
+    repo = "llvm-snippy";
+    rev = "169f6df67fd0b2acc661b4e0cb95e090ecc1bdad";
+    hash = "sha256-chFUH/aVGAsLc7s7HgSP5iVFcNsEK9J9eWdxpz6C3GY=";
   };
+  patches = [ ./nix/llvm-ie-linker.patch ];
 
   sourceRoot = "${finalAttrs.src.name}/llvm";
   strictDeps = true;
@@ -42,9 +43,15 @@ stdenv.mkDerivation (finalAttrs: {
     (lib.cmakeFeature "LLVM_ENABLE_PROJECTS" "lld")
   ];
 
-  installTargets = [ "install-llvm-snippy" ];
+  installTargets = [
+    "install-llvm-snippy"
+    "install-llvm-ie"
+  ];
 
-  ninjaFlags = [ "llvm-snippy" ];
+  ninjaFlags = [
+    "llvm-snippy"
+    "llvm-ie"
+  ];
 
   doCheck = true;
   nativeCheckInputs = [ ];

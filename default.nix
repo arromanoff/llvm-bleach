@@ -14,8 +14,11 @@
   ruby,
   gtest,
   pandoc,
+  qemu,
   llvmPackages,
   llvmLib,
+  llvmSnippy,
+  runTests ? false,
   ...
 }:
 let
@@ -41,17 +44,21 @@ stdenv.mkDerivation {
   nativeBuildInputs = [
     cmake
     ninja
+    # for symtab operations
+    clangCompiler
   ];
   buildInputs = [
     llvmLib
     yaml-cpp
     pandoc
   ];
-  strictDeps = false;
+  strictDeps = true;
   enableShared = false;
   nativeCheckInputs = [
     lit
     filecheck
+    qemu
+    llvmSnippy
     llvmPackages.bintools
     which
     clangCompiler
@@ -68,5 +75,5 @@ stdenv.mkDerivation {
     patchShebangs ..
   '';
   checkInputs = [ gtest ];
-  doCheck = true;
+  doCheck = runTests;
 }

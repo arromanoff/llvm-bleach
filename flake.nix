@@ -60,6 +60,7 @@
               llvm-bleach = normalPkgs.callPackage ./. {
                 inherit self;
                 inherit llvmPackages;
+                inherit llvmSnippy;
                 llvmLib = llvmPackages.llvm;
                 clangCompiler = normalPkgs.clang;
               };
@@ -67,6 +68,9 @@
                 inherit llvmPackages;
                 llvmLib = staticPkgs.llvmPackages_21.llvm;
                 clangCompiler = normalPkgs.clang;
+                inherit llvmSnippy;
+                # FIXME: qemu refuses to build
+                runTests = false;
                 inherit (normalPkgs)
                   lit
                   filecheck
@@ -77,7 +81,7 @@
                   ;
               };
               default = llvm-bleach;
-              llvm-snippy = pkgs.callPackage ./snippy.nix {
+              llvmSnippy = pkgs.callPackage ./snippy.nix {
                 stdenv = llvmPackages.stdenv;
               };
             };
