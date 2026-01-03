@@ -18,7 +18,7 @@
   llvmPackages,
   llvmLib,
   llvmSnippy,
-  runTests ? false,
+  runTests ? true,
   ...
 }:
 let
