@@ -1,0 +1,13 @@
+options:
+  mtriple: riscv64
+  init-regs-in-elf: true
+  last-instr: RET
+  num-instrs: 2000
+  model-plugin: None
+  honor-target-abi: on
+  external-stack: on
+  preserve-caller-saved-regs: [X, F]
+imm-hist:
+  opcodes:
+    - "F.*":
+        - [0, 1.0]

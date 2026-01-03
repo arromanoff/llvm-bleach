@@ -1,0 +1,22 @@
+# RUN: llvm-snippy -march=rv64ifd %S/inputs/options.yaml %s %S/inputs/sections.yaml %S/inputs/callgraph.yaml -o %t.elf
+# RUN: riscv64-unknown-linux-gnu-clang -march=rv64ifd %t.elf %S/inputs/main.c -o %t.out
+# RUN: %config-gen-path/config-gen.rb --march rv64imf \
+# RUN:   --template-dir %config-gen-path/templates -o %t.yaml
+# RUN: ld.lld %t.elf -T %S/inputs/entry.ld -o %t.linked.elf
+# RUN: %bin/llvm-bleach %t.linked.elf --instructions %t.yaml -o %t.ll \
+# RUN:   --state-struct-file=%t.state.h --noinline-instr
+# RUN: sed 's|STATE|%t.state.h|g' %S/inputs/native-main.c > \
+# RUN:   %t.native-main.c
+# RUN: sed -i 's/define void \@bleached_print/define weak void @bleached_print/g' %t.ll
+# RUN: clang %t.native-main.c %t.ll -o %t.native.out -g -fsanitize=address,undefined \
+# RUN:   -I %S/inputs -O0
+# RUN: qemu-riscv64 %t.out > %t.native.log
+# RUN: %t.native.out > %t.log
+# RUN: diff %t.native.log %t.log
+histogram:
+  - [FMADD_D, 2.0]
+  - [FMSUB_D, 2.0]
+  - [FNMADD_D, 2.0]
+  - [FNMSUB_D, 2.0]
+  - [FMADD_D, 2.0]
+  - [JAL, 1.0]

@@ -1,10 +1,10 @@
-# RUN: llvm-snippy -march=rv64ifd %s %S/inputs/sections.yaml %S/inputs/callgraph.yaml -o %t.elf
+# RUN: llvm-snippy -march=rv64ifd %S/inputs/options.yaml %s %S/inputs/sections.yaml %S/inputs/callgraph.yaml -o %t.elf
 # RUN: riscv64-unknown-linux-gnu-clang -march=rv64ifd %t.elf %S/inputs/main.c -o %t.out
 # RUN: %config-gen-path/config-gen.rb --march rv64imf \
 # RUN:   --template-dir %config-gen-path/templates -o %t.yaml
 # RUN: ld.lld %t.elf -T %S/inputs/entry.ld -o %t.linked.elf
 # RUN: %bin/llvm-bleach %t.linked.elf --instructions %t.yaml -o %t.ll \
-# RUN:   --state-struct-file=%t.state.h
+# RUN:   --state-struct-file=%t.state.h --noinline-instr
 # RUN: sed 's|STATE|%t.state.h|g' %S/inputs/native-main.c > \
 # RUN:   %t.native-main.c
 # RUN: sed -i 's/define void \@bleached_print/define weak void @bleached_print/g' %t.ll
@@ -13,23 +13,8 @@
 # RUN: qemu-riscv64 %t.out > %t.native.log
 # RUN: %t.native.out > %t.log
 # RUN: diff %t.native.log %t.log
-options:
-  mtriple: riscv64
-  init-regs-in-elf: true
-  last-instr: RET
-  num-instrs: 1000
-  model-plugin: None
-  honor-target-abi: on
-  external-stack: on
-  preserve-caller-saved-regs: [X, F]
-imm-hist:
-  opcodes:
-    - "FADD_D":
-        - [0, 1]
-    - "FCVT_D_L":
-        - [0, 1]
 histogram:
-  - [ADDI, 1.0]
-  - [FCVT_D_L, 1.0]
-  - [FADD_D, 1.0]
+  - [FSGNJ_D, 2.0]
+  - [FSGNJN_D, 2.0]
+  - [FSGNJX_D, 2.0]
   - [JAL, 1.0]
