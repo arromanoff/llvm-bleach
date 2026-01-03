@@ -69,15 +69,16 @@
                 llvmLib = staticPkgs.llvmPackages_21.llvm;
                 clangCompiler = normalPkgs.clang;
                 inherit llvmSnippy;
-                # FIXME: qemu refuses to build
-                runTests = false;
                 inherit (normalPkgs)
                   lit
                   filecheck
                   yq
                   jq
+                  ruby
                   rubygtest
                   pandoc
+                  gtest
+                  qemu
                   ;
               };
               default = llvm-bleach;
