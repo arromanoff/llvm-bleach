@@ -1,4 +1,4 @@
-# RUN: llvm-snippy -march=rv64ifd %S/inputs/options.yaml %s %S/inputs/sections.yaml %S/inputs/callgraph.yaml -o %t.elf
+# RUN: llvm-snippy -seed 1 -march=rv64ifd %S/inputs/options.yaml %s %S/inputs/sections.yaml %S/inputs/callgraph.yaml -o %t.elf
 # RUN: riscv64-unknown-linux-gnu-clang -march=rv64ifd %t.elf %S/inputs/main.c -o %t.out
 # RUN: %config-gen-path/config-gen.rb --march rv64imf \
 # RUN:   --template-dir %config-gen-path/templates -o %t.yaml
