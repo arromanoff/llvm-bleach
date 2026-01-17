@@ -1118,11 +1118,12 @@ instructions:
       }
   LW:
     func: |
-      define i32 @LW(i\xlen\ %rs1, i\xlen\ %offset) {
+      define i\xlen\ @LW(i\xlen\ %rs1, i\xlen\ %offset) {
         %3 = add i\xlen\ %rs1, %offset
         %4 = inttoptr i\xlen\ %3 to ptr
         %5 = load i32, ptr %4
-        ret i32 %5
+        %6 = sext i32 %5 to i\xlen\
+        ret i\xlen\ %6
       }
   C_JR:
     is_return: [X1]
