@@ -20,6 +20,7 @@ struct normalized_instruction final {
   std::string name;
   std::string function_str;
   std::optional<return_info> retinfo;
+  bool is_pc_relative = false;
   bool is_indirect_branch = false;
   normalized_instruction() = default;
   normalized_instruction(const instruction &instr)
@@ -55,6 +56,8 @@ template <> struct convert<lifter::normalized_instruction> {
         instr.function_str = func.as<std::string>();
       if (auto is_indbr = inst.second["is_indirect_branch"])
         instr.is_indirect_branch = is_indbr.as<bool>();
+      if (auto pcrel = inst.second["pcrelative"])
+        instr.is_pc_relative = pcrel.as<bool>();
       if (auto retinfo = inst.second["is_return"]) {
         if (!retinfo.IsSequence())
           throw std::runtime_error("is_return should be a sequence");
@@ -86,6 +89,7 @@ instruction denormalize_instruction(const normalized_instruction &norm,
   instr.name = norm.name;
   instr.retinfo = norm.retinfo;
   instr.is_indirect_branch = norm.is_indirect_branch;
+  instr.is_pc_relative = norm.is_pc_relative;
   if (norm.function_str.empty())
     return instr;
   llvm::SmallVector<char> ir_buf(norm.function_str.begin(),

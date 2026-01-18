@@ -7,6 +7,10 @@ register-classes:
   FPR_W: "F[0-9][0-9]?_F"
 subregisters:
   FPR_W: "FPR"
+extern-functions:
+  - "@rodata_ptr = external global ptr"
+  - "@rodata_start = external global i64"
+  - "@rodata_size = external global i64"
 instructions:
   # F extension
   FADD_S:
@@ -741,11 +745,36 @@ instructions:
       define i64 @FMV_D_X(i64 %0) {
          ret i64 %0
       }
-  FLD: # Dummy implementation
+  FLD: # Not So Dummy implementation
     func: |
-      define i64 @FLD(i64 %0, i64 %1) {
-        %3 = add i64 0, 0
-        ret i64 %3
+      define i64 @FLD(i64 %rs1, i64 %offset) {
+        %addr = add i64 %rs1, %offset
+        ; load rodata_start
+        %start = load i64, ptr @rodata_start
+        %size  = load i64, ptr @rodata_size
+        %end = add i64 %start, %size
+        ; addr >= start   (unsigned)
+        %ge_start = icmp uge i64 %addr, %start
+        ; addr + 8 <= end (prevent partial read)
+        %addr_plus_8 = add i64 %addr, 8
+        %le_end = icmp ule i64 %addr_plus_8, %end
+        ; inside range?
+        %in_range = and i1 %ge_start, %le_end
+        br i1 %in_range, label %in_bounds, label %out_of_bounds
+      in_bounds:
+        ; byte_offset = addr - start
+        %byte_offset = sub i64 %addr, %start
+        ; load rodata base pointer
+        %base_ptr = load ptr, ptr @rodata_ptr
+        ; byte pointer = rodata_ptr + byte_offset
+        %byte_ptr = getelementptr i8, ptr %base_ptr, i64 %byte_offset
+        %value = load double, ptr %byte_ptr, align 1
+        %i64_value = bitcast double %value to i64
+        ret i64 %i64_value
+      out_of_bounds:
+        %v4 = inttoptr i64 %addr to ptr
+        %v5 = load i64, ptr %v4
+        ret i64 %v5
       }
   FSD: # Dummy implementation
     func: |
@@ -1100,10 +1129,32 @@ instructions:
     requires: rv64
     func: |
       define i64 @LD(i64 %rs1, i64 %offset) {
-        %3 = add i64 %rs1, %offset
-        %4 = inttoptr i64 %3 to ptr
-        %5 = load i64, ptr %4
-        ret i64 %5
+        %addr = add i64 %rs1, %offset
+        ; load rodata_start
+        %start = load i64, ptr @rodata_start
+        %size  = load i64, ptr @rodata_size
+        %end = add i64 %start, %size
+        ; addr >= start   (unsigned)
+        %ge_start = icmp uge i64 %addr, %start
+        ; addr + 8 <= end (prevent partial read)
+        %addr_plus_8 = add i64 %addr, 8
+        %le_end = icmp ule i64 %addr_plus_8, %end
+        ; inside range?
+        %in_range = and i1 %ge_start, %le_end
+        br i1 %in_range, label %in_bounds, label %out_of_bounds
+      in_bounds:
+        ; offset = addr - start
+        %byte_offset = sub i64 %addr, %start
+        ; load rodata base pointer
+        %base_ptr = load ptr, ptr @rodata_ptr
+        ; byte pointer = rodata_ptr + byte_offset
+        %byte_ptr = getelementptr i8, ptr %base_ptr, i64 %byte_offset
+        %value = load i64, ptr %byte_ptr, align 1
+        ret i64 %value
+      out_of_bounds:
+        %v4 = inttoptr i64 %addr to ptr
+        %v5 = load i64, ptr %v4
+        ret i64 %v5
       }
   SW:
     func: |
@@ -1119,8 +1170,31 @@ instructions:
   LW:
     func: |
       define i\xlen\ @LW(i\xlen\ %rs1, i\xlen\ %offset) {
-        %3 = add i\xlen\ %rs1, %offset
-        %4 = inttoptr i\xlen\ %3 to ptr
+        %addr = add i\xlen\ %rs1, %offset
+        ; load rodata_start
+        %start = load i64, ptr @rodata_start
+        %size  = load i64, ptr @rodata_size
+        %end = add i64 %start, %size
+        ; addr >= start   (unsigned)
+        %ge_start = icmp uge i64 %addr, %start
+        ; addr + 4 <= end (prevent partial read)
+        %addr_plus_4 = add i\xlen\ %addr, 4
+        %le_end = icmp ule i\xlen\ %addr_plus_4, %end
+        ; inside range?
+        %in_range = and i1 %ge_start, %le_end
+        br i1 %in_range, label %in_bounds, label %out_of_bounds
+      in_bounds:
+        ; offset = addr - start
+        %byte_offset = sub i\xlen\ %addr, %start
+        ; load rodata base pointer
+        %base_ptr = load ptr, ptr @rodata_ptr
+        ; byte pointer = rodata_ptr + byte_offset
+        %byte_ptr = getelementptr i8, ptr %base_ptr, i\xlen\ %byte_offset
+        %value = load i32, ptr %byte_ptr, align 1
+        %sext_value = sext i32 %value to i\xlen\
+        ret i\xlen\ %sext_value
+      out_of_bounds:
+        %4 = inttoptr i\xlen\ %addr to ptr
         %5 = load i32, ptr %4
         %6 = sext i32 %5 to i\xlen\
         ret i\xlen\ %6
@@ -1178,6 +1252,13 @@ instructions:
       define i1 @BGEU(i\xlen\ noundef signext %0, i\xlen\ noundef signext %1) {
         %3 = icmp uge i\xlen\ %0, %1
         ret i1 %3
+      }
+  AUIPC:
+    pcrelative: true
+    func: |
+      define i64 @AUIPC(i64 %0, i64 %pc) {
+        %3 = add i64 %0, %pc
+        ret i64 %3
       }
   FENCE:
     func: |
