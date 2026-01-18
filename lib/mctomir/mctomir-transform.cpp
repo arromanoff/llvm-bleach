@@ -395,7 +395,7 @@ Error translator_t::link_machine_basic_blocks() {
                                 *res.mi_analysis)) {
             // mbb->addSuccessor(target_it->second);
           } else {
-            MachineBasicBlock *target_mbb =
+            [[maybe_unused]] MachineBasicBlock *target_mbb =
                 get_or_create_mbb_for_address(target, *finfo.mfunc);
             // mbb->addSuccessor(target_mbb);
           }

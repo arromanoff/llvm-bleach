@@ -243,7 +243,7 @@ auto main(int argc, char **argv) -> int try {
     mpm.addPass(createModuleToPostOrderCGSCCPassAdaptor(InlinerPass()));
   mpm.addPass(
       createModuleToFunctionPassAdaptor(SROAPass(SROAOptions::PreserveCFG)));
-  // mpm.addPass(VerifierPass(false));
+  mpm.addPass(VerifierPass(false));
   mpm.run(*m, mam);
   if (output_filename == "-")
     m->print(outs(), nullptr);

@@ -1149,7 +1149,6 @@ Module &bleach_module(Module &m, MachineModuleInfo &mmi,
                       const mctomir::file_info *finfo,
                       std::string_view lifted_prefix,
                       bool assume_functions_nop) {
-
   auto reg_stats = collect_register_stats(instrs, m, mmi);
   std::set<Function *> target_functions;
   ranges::transform(m, std::inserter(target_functions, target_functions.end()),
@@ -1228,7 +1227,18 @@ Module &bleach_module(Module &m, MachineModuleInfo &mmi,
   }
   for (auto *f : target_functions)
     f->eraseFromParent();
-
+  // Remove unused/inlined instr impl functions
+  // TODO: make it a separate pass after inliner
+  auto unused_funcs =
+      m | views::filter([&translated](auto &func) {
+        auto found_translated = ranges::find_if(
+            translated, [target = &func](auto *f) { return f == target; });
+        return (found_translated == translated.end()) && func.user_empty();
+      }) |
+      views::transform([](auto &f) { return &f; }) | ranges::to<std::vector>();
+  for (auto *func : unused_funcs) {
+    func->eraseFromParent();
+  }
   return m;
 }
 } // namespace bleach::lifter
