@@ -1,5 +1,6 @@
 #include "bleach/lifter/lifter.hpp"
 #include "bleach/lifter/instr-impl.hpp"
+#include "mctomir/mctomir-transform.h"
 #include "mctomir/symbols.h"
 
 #include "symtab-ir.h"
@@ -10,7 +11,9 @@
 #include <llvm/CodeGen/MachineModuleInfo.h>
 #include <llvm/CodeGen/MachineRegisterInfo.h>
 #include <llvm/CodeGen/TargetInstrInfo.h>
+#include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/InlineAsm.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IRReader/IRReader.h>
@@ -338,7 +341,9 @@ struct clone_function_result final {
   MachineFunction *mfunc = nullptr;
 };
 
-auto generate_function(MachineFunction &mf, clone_function_result &dst_info,
+auto generate_function(MachineFunction &mf,
+                       const mctomir::translated_function *trfinfo,
+                       clone_function_result &dst_info,
                        const instr_impl &instrs, MachineModuleInfo &mmi,
                        StructType &state, const register_stats &reg_stats,
                        bool functions_nop) {
@@ -352,15 +357,60 @@ auto generate_function(MachineFunction &mf, clone_function_result &dst_info,
     throw std::runtime_error("Could not find stack pointer under the name \"" +
                              instrs.get_stack_pointer().str() + "\"");
   stack_pointer_tracker sptrack(*sp_reg);
-  for (auto &mbb : *dst_info.mfunc)
-    fill_ir_for_bb(mbb, rmap, instrs, tmachine, dst_info.blocks, state,
+  for (auto &&[idx, mbb] : views::enumerate(*dst_info.mfunc)) {
+    const mctomir::translated_block *trblock = nullptr;
+    if (trfinfo)
+      trblock = &trfinfo->blocks.at(idx);
+    fill_ir_for_bb(mbb, trblock, rmap, instrs, tmachine, dst_info.blocks, state,
                    reg_stats, sptrack, functions_nop);
+  }
   save_registers_before_return(func, rmap, tmachine, state, reg_stats);
 }
 
 std::string get_instruction_name(const MachineInstr &minst,
                                  const MCInstrInfo &instr_info) {
   return instr_info.getName(minst.getOpcode()).str();
+}
+
+static GlobalVariable *create_rodata(Module &mod, std::span<std::byte> contents,
+                                     uint64_t rodata_addr) {
+  auto numbytes = contents.size();
+  auto &ctx = mod.getContext();
+  auto *arr_type = ArrayType::get(Type::getInt8Ty(ctx), numbytes);
+  std::vector<uint8_t> vals(numbytes);
+  ranges::transform(contents, vals.begin(),
+                    [](auto b) { return std::to_integer<uint8_t>(b); });
+  auto *arr_constant = ConstantDataArray::get(ctx, ArrayRef<uint8_t>(vals));
+  auto *global_rodata = new GlobalVariable(mod, arr_type, /*isConstant */ true,
+                                           GlobalValue::PrivateLinkage,
+                                           arr_constant, "bleach_rodata");
+  auto *i64_ty = Type::getInt64Ty(ctx);
+  auto *rodata_size = mod.getGlobalVariable("rodata_size");
+  if (rodata_size) {
+    rodata_size->setInitializer(ConstantInt::get(i64_ty, contents.size()));
+    rodata_size->setConstant(true);
+    rodata_size->setLinkage(GlobalValue::ExternalLinkage);
+    rodata_size->setAlignment(Align(8));
+  }
+  auto *rodata_start = mod.getGlobalVariable("rodata_start");
+  if (rodata_start) {
+    rodata_start->setInitializer(ConstantInt::get(i64_ty, rodata_addr));
+    rodata_start->setConstant(true);
+    rodata_start->setLinkage(GlobalValue::ExternalLinkage);
+    rodata_start->setAlignment(Align(8));
+  }
+  auto *rodata_ptr = mod.getGlobalVariable("rodata_ptr");
+  if (rodata_ptr) {
+    auto *zero = ConstantInt::get(i64_ty, 0);
+    auto *rodata_gep = ConstantExpr::getGetElementPtr(
+        arr_type, global_rodata, ArrayRef<Value *>{zero, zero});
+    rodata_ptr->setInitializer(rodata_gep);
+    rodata_ptr->setConstant(true);
+    rodata_ptr->setLinkage(GlobalValue::ExternalLinkage);
+    rodata_ptr->setAlignment(Align(8));
+  }
+
+  return global_rodata;
 }
 
 StructType &create_state_type(LLVMContext &ctx, const register_stats &stats,
@@ -991,16 +1041,26 @@ static Value *cast_value_to(IRBuilder<> &builder, Value *val, Type *ty) {
   return builder.CreateSExtOrTrunc(val, ty);
 }
 
-auto generate_instruction(const MachineInstr &minst, BasicBlock &bb,
-                          IRBuilder<> &builder, reg2vals &rmap,
-                          const instr_impl &instrs,
-                          const TargetMachine &target_machine,
-                          const mbb2bb &m2b, StructType &state,
-                          const register_stats &reg_stats,
-                          stack_pointer_tracker &sptrack, bool functions_nop)
-    -> Value * {
+static bool is_pc_relative(const MachineInstr &minst, const instr_impl &instrs,
+                           const TargetMachine &tmachine) {
+  auto *iinfo = tmachine.getMCInstrInfo();
+  auto name = get_instruction_name(minst, *iinfo);
+  auto instr = instrs.find(name);
+  if (instr == instrs.end())
+    return false;
+  return instr->is_pc_relative;
+}
+
+auto generate_instruction(
+    const MachineInstr &minst, std::optional<uint64_t> addr, BasicBlock &bb,
+    IRBuilder<> &builder, reg2vals &rmap, const instr_impl &instrs,
+    const TargetMachine &target_machine, const mbb2bb &m2b, StructType &state,
+    const register_stats &reg_stats, stack_pointer_tracker &sptrack,
+    bool functions_nop) -> Value * {
   auto *iinfo = target_machine.getMCInstrInfo();
   auto name = get_instruction_name(minst, *iinfo);
+  // TODO: check if instruction is SP-relative and pass constant address in that
+  // case
   if (is_return(minst, instrs, target_machine))
     return generate_return(minst, target_machine, builder, rmap, reg_stats,
                            bb.getParent());
@@ -1025,6 +1085,10 @@ auto generate_instruction(const MachineInstr &minst, BasicBlock &bb,
     return generate_load_store_from_stack(minst, builder, bb, rmap, instrs,
                                           target_machine, state, reg_stats);
   }
+  bool pcrel = is_pc_relative(minst, instrs, target_machine);
+  if (pcrel && !addr)
+    throw std::runtime_error("Program Counter relative instruction encountered "
+                             "but no address information is available");
 
   // TODO: track stack pointerS
   auto *m = bb.getParent()->getParent();
@@ -1060,6 +1124,8 @@ auto generate_instruction(const MachineInstr &minst, BasicBlock &bb,
                                         reg_stats, instrs);
               }) |
               ranges::to<std::vector>();
+  if (pcrel)
+    args.push_back(ConstantInt::get(m->getContext(), APInt(64, *addr)));
   auto casted_args = views::zip(args, param_types) |
                      views::transform([&](auto &&arg) -> Value * {
                        auto &&[val, ty] = arg;
@@ -1080,7 +1146,8 @@ auto generate_instruction(const MachineInstr &minst, BasicBlock &bb,
   return call;
 }
 
-void fill_ir_for_bb(MachineBasicBlock &mbb, reg2vals &rmap,
+void fill_ir_for_bb(MachineBasicBlock &mbb,
+                    const mctomir::translated_block *trbinfo, reg2vals &rmap,
                     const instr_impl &instrs,
                     const TargetMachine &target_machine, const mbb2bb &m2b,
                     StructType &state, const register_stats &reg_stats,
@@ -1090,9 +1157,15 @@ void fill_ir_for_bb(MachineBasicBlock &mbb, reg2vals &rmap,
   IRBuilder builder(bb->getContext());
   builder.SetInsertPoint(bb);
   assert(bb);
-  for (auto &minst : mbb) {
-    generate_instruction(minst, *bb, builder, rmap, instrs, target_machine, m2b,
-                         state, reg_stats, sptrack, functions_nop);
+  for (auto &&[idx, minst] : views::enumerate(mbb)) {
+    auto addr = [&] -> std::optional<uint64_t> {
+      if (trbinfo)
+        return trbinfo->instrs.at(idx)->address;
+      return std::nullopt;
+    }();
+    generate_instruction(minst, addr, *bb, builder, rmap, instrs,
+                         target_machine, m2b, state, reg_stats, sptrack,
+                         functions_nop);
   }
   auto last = std::prev(mbb.end());
   if (!is_branch(*last, target_machine) &&
@@ -1144,11 +1217,13 @@ static void print_state_header(std::ostream &os, std::span<Function *> funcs,
 }
 
 Module &bleach_module(Module &m, MachineModuleInfo &mmi,
+                      std::span<mctomir::translated_function> trfinfo,
                       const instr_impl &instrs,
                       std::string_view state_struct_file, size_t stack_size,
                       const mctomir::file_info *finfo,
-                      std::string_view lifted_prefix,
-                      bool assume_functions_nop) {
+                      std::string_view lifted_prefix, bool assume_functions_nop,
+                      std::span<std::byte> rodata,
+                      std::optional<uint64_t> rodata_start) {
   auto reg_stats = collect_register_stats(instrs, m, mmi);
   std::set<Function *> target_functions;
   ranges::transform(m, std::inserter(target_functions, target_functions.end()),
@@ -1188,10 +1263,27 @@ Module &bleach_module(Module &m, MachineModuleInfo &mmi,
   create_bleach_symtab_add_function_decl(m);
   create_bleach_symtab_lookup_function_decl(m);
 
+  [[maybe_unused]] auto *rodata_global = [&] -> GlobalVariable * {
+    if (!rodata.empty()) {
+      assert(rodata_start &&
+             "If rodata contents are found rodata_start is necessary as well");
+      return create_rodata(m, rodata, *rodata_start);
+    }
+    return nullptr;
+  }();
   auto &state = create_state_type(m.getContext(), reg_stats, stack_size);
-  for (auto &&[oldf, func_info] : funcs)
-    generate_function(*oldf, func_info, instrs, mmi, state, reg_stats,
+  for (auto &&[oldf, func_info] : funcs) {
+    auto found =
+        ranges::find_if(trfinfo, [name = func_info.mfunc->getName()](auto &f) {
+          return f.name == name;
+        });
+    const mctomir::translated_function *trfunc = nullptr;
+    if (!trfinfo.empty()) {
+      trfunc = std::addressof(*found);
+    }
+    generate_function(*oldf, trfunc, func_info, instrs, mmi, state, reg_stats,
                       assume_functions_nop);
+  }
   if (finfo) {
     for (auto *func :
          translated | views::filter([](auto *f) { return !f->empty(); }))

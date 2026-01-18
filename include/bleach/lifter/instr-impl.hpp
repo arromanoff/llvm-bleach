@@ -33,6 +33,7 @@ struct instruction final {
   std::string name;
   std::unique_ptr<Module> ir_module;
   std::optional<return_info> retinfo;
+  bool is_pc_relative = false;
   bool is_indirect_branch = false;
 };
 

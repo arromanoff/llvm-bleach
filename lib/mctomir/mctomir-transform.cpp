@@ -24,6 +24,7 @@
 #include <iostream>
 #include <ranges>
 #include <set>
+#include <string_view>
 
 namespace mctomir {
 using namespace llvm;
@@ -442,6 +443,31 @@ translator_t::get_or_create_mbb_for_address(uint64_t address,
   return mbb;
 }
 
+void translator_t::set_rodata(StringRef contents, uint64_t start) {
+  auto &rodata = res.rodata;
+  rodata.resize(contents.size());
+  ranges::transform(contents, rodata.begin(),
+                    [](auto b) { return std::byte{b}; });
+  res.rodata_start = start;
+}
+
+Error elf_to_mir_converter::read_rodata() {
+  SectionRef section;
+  if (Error err = loader.get_section_by_name(".rodata", section)) {
+    // we only can fail here if section does not exist. And it is fine
+    consumeError(std::move(err));
+    return Error::success();
+  }
+
+  Expected<StringRef> contents_or_err = loader.get_section_contents(section);
+  if (!contents_or_err)
+    return contents_or_err.takeError();
+
+  StringRef contents = contents_or_err.get();
+  translator->set_rodata(contents, section.getAddress());
+  return Error::success();
+}
+
 Error translator_t::write_mir(StringRef output_filename) const {
   std::error_code ec;
   raw_fd_ostream os(output_filename, ec);
@@ -534,6 +560,10 @@ translation_result lift_elf_file(LLVMContext &ctx,
   if (Error err = converter.convert_section(section_name))
     throw std::runtime_error("Failed to convert section: " +
                              toString(std::move(err)));
+  if (Error err = converter.read_rodata())
+    throw std::runtime_error("Failed to read .rodata section" +
+                             toString(std::move(err)));
+
   return std::move(converter.get_translator()).get_result();
 }
 

@@ -29,8 +29,8 @@ namespace views = std::views;
 PreservedAnalyses block_ir_builder_pass::run(Module &m,
                                              ModuleAnalysisManager &mam) {
   auto &mmi = mam.getResult<MachineModuleAnalysis>(m).getMMI();
-  bleach_module(m, mmi, instrs, state_struct_file, stack_size, finfo,
-                lifted_prefix, assume_functions_nop);
+  bleach_module(m, mmi, funcs, instrs, state_struct_file, stack_size, finfo,
+                lifted_prefix, assume_functions_nop, rodata, rodata_start);
   return PreservedAnalyses::none();
 }
 

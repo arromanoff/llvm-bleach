@@ -117,6 +117,9 @@ struct input_mir final {
   std::unique_ptr<Module> mod;
   std::unique_ptr<TargetMachine> tmachine;
   std::unique_ptr<MachineModuleInfo> mmi;
+  std::vector<mctomir::translated_function> funcs;
+  std::vector<std::byte> rodata;
+  uint64_t rodata_start;
 };
 
 input_mir read_or_translate_mir(const std::filesystem::path &input_file,
@@ -126,7 +129,10 @@ input_mir read_or_translate_mir(const std::filesystem::path &input_file,
     auto translated = mctomir::lift_elf_file(ctx, input_file.native());
     return {.mod = std::move(translated.mod),
             .tmachine = std::move(translated.tmachine),
-            .mmi = std::move(translated.mmi)};
+            .mmi = std::move(translated.mmi),
+            .funcs = std::move(translated.funcs),
+            .rodata = std::move(translated.rodata),
+            .rodata_start = translated.rodata_start};
   }
   SMDiagnostic err_mir_parser;
   auto mir_parser =
@@ -185,7 +191,8 @@ auto main(int argc, char **argv) -> int try {
   InitializeAllDisassemblers();
   LLVMContext ctx;
   auto input_mir = read_or_translate_mir(input_file_name.getValue(), ctx);
-  auto &[m, target_machine, machine_module_info] = input_mir;
+  auto &[m, target_machine, machine_module_info, funcs, rodata, rodata_start] =
+      input_mir;
   assert(machine_module_info);
   if (!instructions_file.getNumOccurrences()) {
     std::cerr << "Skipping instructions parsing since no file were provided\n";
@@ -235,8 +242,10 @@ auto main(int argc, char **argv) -> int try {
   if (dump_input_mir)
     mpm.addPass(print_pass());
   mpm.addPass(bleach::lifter::block_ir_builder_pass(
-      instrs, assume_function_nop.getValue(), dump_struct_def_option.getValue(),
-      finfo.get(), stack_size_option.getValue(), lifted_prefix.getValue()));
+      instrs, std::move(funcs), assume_function_nop.getValue(),
+      dump_struct_def_option.getValue(), finfo.get(),
+      stack_size_option.getValue(), lifted_prefix.getValue(), std::move(rodata),
+      rodata_start));
   mpm.addPass(createModuleToFunctionPassAdaptor(
       bleach::lifter::redundant_branch_eraser()));
   if (!no_inline_opt)

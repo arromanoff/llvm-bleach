@@ -2,6 +2,7 @@
 
 #include "bleach/lifter/instr-impl.hpp"
 
+#include "mctomir/mctomir-transform.h"
 #include "mctomir/symbols.h"
 
 #include <llvm/IR/BasicBlock.h>
@@ -144,7 +145,8 @@ public:
   using unordered_set::size;
 };
 
-void fill_ir_for_bb(MachineBasicBlock &mbb, reg2vals &rmap,
+void fill_ir_for_bb(MachineBasicBlock &mbb,
+                    const mctomir::translated_block *trbinfo, reg2vals &rmap,
                     const instr_impl &instrs, const TargetMachine &tm,
                     const mbb2bb &m2b, StructType &state,
                     const register_stats &reg_stats,
@@ -162,10 +164,12 @@ basic_block clone_basic_block(MachineBasicBlock &src, MachineFunction &dst);
 StructType &create_state_type(LLVMContext &ctx);
 
 Module &bleach_module(Module &m, MachineModuleInfo &mmi,
+                      std::span<mctomir::translated_function> trfinfo,
                       const instr_impl &instrs,
                       std::string_view state_struct_file, size_t stack_size,
                       const mctomir::file_info *finfo,
-                      std::string_view lifted_prefix,
-                      bool assume_functions_nop);
+                      std::string_view lifted_prefix, bool assume_functions_nop,
+                      std::span<std::byte> rodata,
+                      std::optional<uint64_t> rodata_start);
 
 } // namespace bleach::lifter
