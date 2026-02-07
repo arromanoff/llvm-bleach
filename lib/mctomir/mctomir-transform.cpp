@@ -444,11 +444,11 @@ translator_t::get_or_create_mbb_for_address(uint64_t address,
 }
 
 void translator_t::set_rodata(StringRef contents, uint64_t start) {
-  auto &rodata = res.rodata;
+  res.sections.push_back({.data = {}, .name = "rodata", .start = start});
+  auto &rodata = res.sections.back().data;
   rodata.resize(contents.size());
   ranges::transform(contents, rodata.begin(),
                     [](auto b) { return std::byte{b}; });
-  res.rodata_start = start;
 }
 
 Error elf_to_mir_converter::read_rodata() {

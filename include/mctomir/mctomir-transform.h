@@ -62,6 +62,12 @@ struct translated_function final {
   MachineFunction *mfunc = nullptr;
 };
 
+struct section_info final {
+  std::vector<std::byte> data;
+  std::string name;
+  uint64_t start;
+};
+
 struct translation_result final {
   std::unique_ptr<Module> mod;
   std::unique_ptr<MachineModuleInfo> mmi;
@@ -69,8 +75,7 @@ struct translation_result final {
   std::unique_ptr<TargetMachine> tmachine;
   std::unique_ptr<MCContext> mcctx;
   std::unique_ptr<MCInstrAnalysis> mi_analysis;
-  std::vector<std::byte> rodata;
-  uint64_t rodata_start;
+  std::vector<section_info> sections;
 };
 
 class translator_t final {

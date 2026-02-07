@@ -372,45 +372,48 @@ std::string get_instruction_name(const MachineInstr &minst,
   return instr_info.getName(minst.getOpcode()).str();
 }
 
-static GlobalVariable *create_rodata(Module &mod, std::span<std::byte> contents,
-                                     uint64_t rodata_addr) {
-  auto numbytes = contents.size();
+static GlobalVariable *
+create_section_global(Module &mod, const mctomir::section_info &section) {
+  auto numbytes = section.data.size();
   auto &ctx = mod.getContext();
   auto *arr_type = ArrayType::get(Type::getInt8Ty(ctx), numbytes);
   std::vector<uint8_t> vals(numbytes);
-  ranges::transform(contents, vals.begin(),
+  ranges::transform(section.data, vals.begin(),
                     [](auto b) { return std::to_integer<uint8_t>(b); });
   auto *arr_constant = ConstantDataArray::get(ctx, ArrayRef<uint8_t>(vals));
-  auto *global_rodata = new GlobalVariable(mod, arr_type, /*isConstant */ true,
-                                           GlobalValue::PrivateLinkage,
-                                           arr_constant, "bleach_rodata");
+  auto *global_section = new GlobalVariable(
+      mod, arr_type, /*isConstant */ true, GlobalValue::PrivateLinkage,
+      arr_constant, std::format("bleach_{}", section.name));
   auto *i64_ty = Type::getInt64Ty(ctx);
-  auto *rodata_size = mod.getGlobalVariable("rodata_size");
-  if (rodata_size) {
-    rodata_size->setInitializer(ConstantInt::get(i64_ty, contents.size()));
-    rodata_size->setConstant(true);
-    rodata_size->setLinkage(GlobalValue::ExternalLinkage);
-    rodata_size->setAlignment(Align(8));
+  auto *section_size =
+      mod.getGlobalVariable(std::format("{}_size", section.name));
+  if (section_size) {
+    section_size->setInitializer(ConstantInt::get(i64_ty, section.data.size()));
+    section_size->setConstant(true);
+    section_size->setLinkage(GlobalValue::ExternalLinkage);
+    section_size->setAlignment(Align(8));
   }
-  auto *rodata_start = mod.getGlobalVariable("rodata_start");
-  if (rodata_start) {
-    rodata_start->setInitializer(ConstantInt::get(i64_ty, rodata_addr));
-    rodata_start->setConstant(true);
-    rodata_start->setLinkage(GlobalValue::ExternalLinkage);
-    rodata_start->setAlignment(Align(8));
+  auto *section_start =
+      mod.getGlobalVariable(std::format("{}_start", section.name));
+  if (section_start) {
+    section_start->setInitializer(ConstantInt::get(i64_ty, section.start));
+    section_start->setConstant(true);
+    section_start->setLinkage(GlobalValue::ExternalLinkage);
+    section_start->setAlignment(Align(8));
   }
-  auto *rodata_ptr = mod.getGlobalVariable("rodata_ptr");
-  if (rodata_ptr) {
+  auto *section_ptr =
+      mod.getGlobalVariable(std::format("{}_ptr", section.name));
+  if (section_ptr) {
     auto *zero = ConstantInt::get(i64_ty, 0);
-    auto *rodata_gep = ConstantExpr::getGetElementPtr(
-        arr_type, global_rodata, ArrayRef<Value *>{zero, zero});
-    rodata_ptr->setInitializer(rodata_gep);
-    rodata_ptr->setConstant(true);
-    rodata_ptr->setLinkage(GlobalValue::ExternalLinkage);
-    rodata_ptr->setAlignment(Align(8));
+    auto *section_gep = ConstantExpr::getGetElementPtr(
+        arr_type, global_section, ArrayRef<Value *>{zero, zero});
+    section_ptr->setInitializer(section_gep);
+    section_ptr->setConstant(true);
+    section_ptr->setLinkage(GlobalValue::ExternalLinkage);
+    section_ptr->setAlignment(Align(8));
   }
 
-  return global_rodata;
+  return global_section;
 }
 
 StructType &create_state_type(LLVMContext &ctx, const register_stats &stats,
@@ -1222,8 +1225,7 @@ Module &bleach_module(Module &m, MachineModuleInfo &mmi,
                       std::string_view state_struct_file, size_t stack_size,
                       const mctomir::file_info *finfo,
                       std::string_view lifted_prefix, bool assume_functions_nop,
-                      std::span<std::byte> rodata,
-                      std::optional<uint64_t> rodata_start) {
+                      std::span<mctomir::section_info> sections) {
   auto reg_stats = collect_register_stats(instrs, m, mmi);
   std::set<Function *> target_functions;
   ranges::transform(m, std::inserter(target_functions, target_functions.end()),
@@ -1262,15 +1264,9 @@ Module &bleach_module(Module &m, MachineModuleInfo &mmi,
 
   create_bleach_symtab_add_function_decl(m);
   create_bleach_symtab_lookup_function_decl(m);
-
-  [[maybe_unused]] auto *rodata_global = [&] -> GlobalVariable * {
-    if (!rodata.empty()) {
-      assert(rodata_start &&
-             "If rodata contents are found rodata_start is necessary as well");
-      return create_rodata(m, rodata, *rodata_start);
-    }
-    return nullptr;
-  }();
+  std::vector<GlobalVariable *> section_globals(sections.size());
+  ranges::transform(sections, section_globals.begin(),
+                    [&m](auto &s) { return create_section_global(m, s); });
   auto &state = create_state_type(m.getContext(), reg_stats, stack_size);
   for (auto &&[oldf, func_info] : funcs) {
     auto found =

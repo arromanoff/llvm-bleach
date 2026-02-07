@@ -118,8 +118,7 @@ struct input_mir final {
   std::unique_ptr<TargetMachine> tmachine;
   std::unique_ptr<MachineModuleInfo> mmi;
   std::vector<mctomir::translated_function> funcs;
-  std::vector<std::byte> rodata;
-  uint64_t rodata_start;
+  std::vector<mctomir::section_info> sections;
 };
 
 input_mir read_or_translate_mir(const std::filesystem::path &input_file,
@@ -127,12 +126,13 @@ input_mir read_or_translate_mir(const std::filesystem::path &input_file,
   if (!is_mir_file(input_file)) {
     // Treat all non-MIR files as ELFs
     auto translated = mctomir::lift_elf_file(ctx, input_file.native());
-    return {.mod = std::move(translated.mod),
-            .tmachine = std::move(translated.tmachine),
-            .mmi = std::move(translated.mmi),
-            .funcs = std::move(translated.funcs),
-            .rodata = std::move(translated.rodata),
-            .rodata_start = translated.rodata_start};
+    return {
+        .mod = std::move(translated.mod),
+        .tmachine = std::move(translated.tmachine),
+        .mmi = std::move(translated.mmi),
+        .funcs = std::move(translated.funcs),
+        .sections = std::move(translated.sections),
+    };
   }
   SMDiagnostic err_mir_parser;
   auto mir_parser =
@@ -191,8 +191,7 @@ auto main(int argc, char **argv) -> int try {
   InitializeAllDisassemblers();
   LLVMContext ctx;
   auto input_mir = read_or_translate_mir(input_file_name.getValue(), ctx);
-  auto &[m, target_machine, machine_module_info, funcs, rodata, rodata_start] =
-      input_mir;
+  auto &[m, target_machine, machine_module_info, funcs, sections] = input_mir;
   assert(machine_module_info);
   if (!instructions_file.getNumOccurrences()) {
     std::cerr << "Skipping instructions parsing since no file were provided\n";
@@ -244,8 +243,8 @@ auto main(int argc, char **argv) -> int try {
   mpm.addPass(bleach::lifter::block_ir_builder_pass(
       instrs, std::move(funcs), assume_function_nop.getValue(),
       dump_struct_def_option.getValue(), finfo.get(),
-      stack_size_option.getValue(), lifted_prefix.getValue(), std::move(rodata),
-      rodata_start));
+      stack_size_option.getValue(), lifted_prefix.getValue(),
+      std::move(sections)));
   mpm.addPass(createModuleToFunctionPassAdaptor(
       bleach::lifter::redundant_branch_eraser()));
   if (!no_inline_opt)

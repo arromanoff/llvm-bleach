@@ -11,6 +11,7 @@ extern-functions:
   - "@rodata_ptr = external global ptr"
   - "@rodata_start = external global i64"
   - "@rodata_size = external global i64"
+  - "declare ptr @bleach_try_get_real_addr(i64 addr)"
 instructions:
   # F extension
   FADD_S:

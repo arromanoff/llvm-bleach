@@ -169,7 +169,6 @@ Module &bleach_module(Module &m, MachineModuleInfo &mmi,
                       std::string_view state_struct_file, size_t stack_size,
                       const mctomir::file_info *finfo,
                       std::string_view lifted_prefix, bool assume_functions_nop,
-                      std::span<std::byte> rodata,
-                      std::optional<uint64_t> rodata_start);
+                      std::span<mctomir::section_info> sections);
 
 } // namespace bleach::lifter
