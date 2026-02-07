@@ -24,6 +24,7 @@
 #include <iostream>
 #include <ranges>
 #include <set>
+#include <stdexcept>
 #include <string_view>
 
 namespace mctomir {
@@ -443,9 +444,20 @@ translator_t::get_or_create_mbb_for_address(uint64_t address,
   return mbb;
 }
 
+static section_info::access get_access(SectionRef section) {
+  auto acc = section_info::access::r;
+  ELFSectionRef elfsec(section);
+  auto flags = elfsec.getFlags();
+  if (flags & (ELF::SHF_WRITE))
+    acc = static_cast<section_info::access>(acc | section_info::access::w);
+  return acc;
+  throw std::invalid_argument("Non-ELF sections are not suppo  rted");
+}
+
 void translator_t::set_section(StringRef name, StringRef contents,
-                               uint64_t start) {
-  res.sections.push_back({.data = {}, .name = name.str(), .start = start});
+                               uint64_t start, section_info::access acc) {
+  res.sections.push_back(
+      {.data = {}, .name = name.str(), .start = start, .acc = acc});
   auto &data = res.sections.back().data;
   data.resize(contents.size());
   ranges::transform(contents, data.begin(), [](char b) {
@@ -469,7 +481,8 @@ Error elf_to_mir_converter::read_sections() {
       auto name = section.getName();
       if (auto err = name.takeError())
         return err;
-      translator->set_section(*name, contents, section.getAddress());
+      translator->set_section(*name, contents, section.getAddress(),
+                              get_access(section));
     }
   }
   return Error::success();

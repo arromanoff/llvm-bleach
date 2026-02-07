@@ -63,9 +63,14 @@ struct translated_function final {
 };
 
 struct section_info final {
+  enum access : unsigned {
+    r = 0b01,
+    w = 0b10,
+  };
   std::vector<std::byte> data;
   std::string name;
   uint64_t start;
+  access acc = access::r;
 };
 
 struct translation_result final {
@@ -94,7 +99,8 @@ public:
 
   void print_mir(raw_ostream &os) const;
 
-  void set_section(StringRef name, StringRef contents, uint64_t start);
+  void set_section(StringRef name, StringRef contents, uint64_t start,
+                   section_info::access acc);
 
   const auto &get_funcs() const & { return res.funcs; }
   auto &&get_result() && { return std::move(res); }

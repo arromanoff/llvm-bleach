@@ -385,8 +385,10 @@ create_section_global(Module &mod, const mctomir::section_info &section) {
   if (name[0] == '.')
     name.erase(0, 1);
   auto *global_section = new GlobalVariable(
-      mod, arr_type, /*isConstant */ true, GlobalValue::PrivateLinkage,
-      arr_constant, std::format("bleach_{}", name));
+      mod, arr_type,
+      /*isConstant */ !(section.acc & mctomir::section_info::access::w),
+      GlobalValue::PrivateLinkage, arr_constant,
+      std::format("bleach_{}", name));
   auto *i64_ty = Type::getInt64Ty(ctx);
   auto *section_size = mod.getGlobalVariable(std::format("{}_size", name));
   if (section_size) {
