@@ -381,28 +381,28 @@ create_section_global(Module &mod, const mctomir::section_info &section) {
   ranges::transform(section.data, vals.begin(),
                     [](auto b) { return std::to_integer<uint8_t>(b); });
   auto *arr_constant = ConstantDataArray::get(ctx, ArrayRef<uint8_t>(vals));
+  auto name = section.name;
+  if (name[0] == '.')
+    name.erase(0, 1);
   auto *global_section = new GlobalVariable(
       mod, arr_type, /*isConstant */ true, GlobalValue::PrivateLinkage,
-      arr_constant, std::format("bleach_{}", section.name));
+      arr_constant, std::format("bleach_{}", name));
   auto *i64_ty = Type::getInt64Ty(ctx);
-  auto *section_size =
-      mod.getGlobalVariable(std::format("{}_size", section.name));
+  auto *section_size = mod.getGlobalVariable(std::format("{}_size", name));
   if (section_size) {
     section_size->setInitializer(ConstantInt::get(i64_ty, section.data.size()));
     section_size->setConstant(true);
     section_size->setLinkage(GlobalValue::ExternalLinkage);
     section_size->setAlignment(Align(8));
   }
-  auto *section_start =
-      mod.getGlobalVariable(std::format("{}_start", section.name));
+  auto *section_start = mod.getGlobalVariable(std::format("{}_start", name));
   if (section_start) {
     section_start->setInitializer(ConstantInt::get(i64_ty, section.start));
     section_start->setConstant(true);
     section_start->setLinkage(GlobalValue::ExternalLinkage);
     section_start->setAlignment(Align(8));
   }
-  auto *section_ptr =
-      mod.getGlobalVariable(std::format("{}_ptr", section.name));
+  auto *section_ptr = mod.getGlobalVariable(std::format("{}_ptr", name));
   if (section_ptr) {
     auto *zero = ConstantInt::get(i64_ty, 0);
     auto *section_gep = ConstantExpr::getGetElementPtr(

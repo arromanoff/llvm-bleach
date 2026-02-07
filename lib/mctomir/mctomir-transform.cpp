@@ -443,28 +443,35 @@ translator_t::get_or_create_mbb_for_address(uint64_t address,
   return mbb;
 }
 
-void translator_t::set_rodata(StringRef contents, uint64_t start) {
-  res.sections.push_back({.data = {}, .name = "rodata", .start = start});
-  auto &rodata = res.sections.back().data;
-  rodata.resize(contents.size());
-  ranges::transform(contents, rodata.begin(),
-                    [](auto b) { return std::byte{b}; });
+void translator_t::set_section(StringRef name, StringRef contents,
+                               uint64_t start) {
+  res.sections.push_back({.data = {}, .name = name.str(), .start = start});
+  auto &data = res.sections.back().data;
+  data.resize(contents.size());
+  ranges::transform(contents, data.begin(), [](char b) {
+    return std::byte{static_cast<unsigned char>(b)};
+  });
 }
 
-Error elf_to_mir_converter::read_rodata() {
-  SectionRef section;
-  if (Error err = loader.get_section_by_name(".rodata", section)) {
-    // we only can fail here if section does not exist. And it is fine
-    consumeError(std::move(err));
-    return Error::success();
+Error elf_to_mir_converter::read_sections() {
+  auto elf_object_or_err = loader.get_elf_object();
+  if (auto err = elf_object_or_err.takeError())
+    return err;
+  auto *elf = *elf_object_or_err;
+  for (auto &section : elf->sections()) {
+    if (section.isData()) {
+      Expected<StringRef> contents_or_err =
+          loader.get_section_contents(section);
+      if (!contents_or_err)
+        return contents_or_err.takeError();
+
+      StringRef contents = contents_or_err.get();
+      auto name = section.getName();
+      if (auto err = name.takeError())
+        return err;
+      translator->set_section(*name, contents, section.getAddress());
+    }
   }
-
-  Expected<StringRef> contents_or_err = loader.get_section_contents(section);
-  if (!contents_or_err)
-    return contents_or_err.takeError();
-
-  StringRef contents = contents_or_err.get();
-  translator->set_rodata(contents, section.getAddress());
   return Error::success();
 }
 
@@ -560,8 +567,8 @@ translation_result lift_elf_file(LLVMContext &ctx,
   if (Error err = converter.convert_section(section_name))
     throw std::runtime_error("Failed to convert section: " +
                              toString(std::move(err)));
-  if (Error err = converter.read_rodata())
-    throw std::runtime_error("Failed to read .rodata section" +
+  if (Error err = converter.read_sections())
+    throw std::runtime_error("Failed to read data sections" +
                              toString(std::move(err)));
 
   return std::move(converter.get_translator()).get_result();

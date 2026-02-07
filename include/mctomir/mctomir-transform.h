@@ -94,7 +94,7 @@ public:
 
   void print_mir(raw_ostream &os) const;
 
-  void set_rodata(StringRef contents, uint64_t start);
+  void set_section(StringRef name, StringRef contents, uint64_t start);
 
   const auto &get_funcs() const & { return res.funcs; }
   auto &&get_result() && { return std::move(res); }
@@ -141,7 +141,7 @@ public:
 
   Error process_file(StringRef file_path);
   Error convert_section(StringRef section_name);
-  Error read_rodata();
+  Error read_sections();
   Error write_mir(StringRef output_path);
   void print_mir(raw_ostream &os);
   auto &get_translator() const & { return *translator; }
