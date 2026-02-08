@@ -1,0 +1,6 @@
+#pragma once
+
+#include <string>
+namespace bleach {
+namespace lifter {
+static inline std::string section_intrinsics_ir_string = R"(

@@ -465,13 +465,21 @@ void translator_t::set_section(StringRef name, StringRef contents,
   });
 }
 
+static bool is_data_section(SectionRef section) {
+  if (section.isData())
+    return true;
+  ELFSectionRef elf_section(section);
+  auto flags = elf_section.getFlags();
+  return (flags & ELF::SHF_ALLOC);
+}
+
 Error elf_to_mir_converter::read_sections() {
   auto elf_object_or_err = loader.get_elf_object();
   if (auto err = elf_object_or_err.takeError())
     return err;
   auto *elf = *elf_object_or_err;
   for (auto &section : elf->sections()) {
-    if (section.isData()) {
+    if (is_data_section(section)) {
       Expected<StringRef> contents_or_err =
           loader.get_section_contents(section);
       if (!contents_or_err)

@@ -3,6 +3,7 @@
 #include "mctomir/mctomir-transform.h"
 #include "mctomir/symbols.h"
 
+#include "section_intrinsics-ir.h"
 #include "symtab-ir.h"
 
 #include <algorithm>
@@ -372,8 +373,15 @@ std::string get_instruction_name(const MachineInstr &minst,
   return instr_info.getName(minst.getOpcode()).str();
 }
 
-static GlobalVariable *
-create_section_global(Module &mod, const mctomir::section_info &section) {
+struct section_globals final {
+  GlobalVariable *data;
+  GlobalVariable *size;
+  GlobalVariable *start;
+  GlobalVariable *ptr;
+};
+
+static section_globals
+create_section_globals(Module &mod, const mctomir::section_info &section) {
   auto numbytes = section.data.size();
   auto &ctx = mod.getContext();
   auto *arr_type = ArrayType::get(Type::getInt8Ty(ctx), numbytes);
@@ -390,32 +398,97 @@ create_section_global(Module &mod, const mctomir::section_info &section) {
       GlobalValue::PrivateLinkage, arr_constant,
       std::format("bleach_{}", name));
   auto *i64_ty = Type::getInt64Ty(ctx);
-  auto *section_size = mod.getGlobalVariable(std::format("{}_size", name));
-  if (section_size) {
-    section_size->setInitializer(ConstantInt::get(i64_ty, section.data.size()));
-    section_size->setConstant(true);
-    section_size->setLinkage(GlobalValue::ExternalLinkage);
-    section_size->setAlignment(Align(8));
-  }
-  auto *section_start = mod.getGlobalVariable(std::format("{}_start", name));
-  if (section_start) {
-    section_start->setInitializer(ConstantInt::get(i64_ty, section.start));
-    section_start->setConstant(true);
-    section_start->setLinkage(GlobalValue::ExternalLinkage);
-    section_start->setAlignment(Align(8));
-  }
-  auto *section_ptr = mod.getGlobalVariable(std::format("{}_ptr", name));
-  if (section_ptr) {
-    auto *zero = ConstantInt::get(i64_ty, 0);
-    auto *section_gep = ConstantExpr::getGetElementPtr(
-        arr_type, global_section, ArrayRef<Value *>{zero, zero});
-    section_ptr->setInitializer(section_gep);
-    section_ptr->setConstant(true);
-    section_ptr->setLinkage(GlobalValue::ExternalLinkage);
-    section_ptr->setAlignment(Align(8));
+  // Modify if declared else create
+  auto create_global = [&mod](std::string varname, Constant *val) {
+    auto *glob = mod.getGlobalVariable(varname);
+    if (glob) {
+      glob->setInitializer(val);
+      glob->setConstant(true);
+      glob->setLinkage(GlobalValue::PrivateLinkage);
+      glob->setAlignment(Align(8));
+      return glob;
+    }
+    glob = new GlobalVariable(mod, val->getType(), /*isConstant=*/true,
+                              GlobalValue::PrivateLinkage, val, varname);
+    return glob;
+  };
+  auto *section_size =
+      create_global(std::format("{}_size", name),
+                    ConstantInt::get(i64_ty, section.data.size()));
+  assert(section_size);
+  auto *section_start = create_global(std::format("{}_start", name),
+                                      ConstantInt::get(i64_ty, section.start));
+  assert(section_start);
+  auto *zero = ConstantInt::get(i64_ty, 0);
+  auto *section_ptr_val = ConstantExpr::getGetElementPtr(
+      arr_type, global_section, ArrayRef<Value *>{zero, zero});
+  auto *section_ptr =
+      create_global(std::format("{}_ptr", name), section_ptr_val);
+  assert(section_ptr);
+  return {.data = global_section,
+          .size = section_size,
+          .start = section_start,
+          .ptr = section_ptr};
+}
+
+static GlobalVariable *
+create_sections_array_global(Module &mod, std::span<section_globals> sections) {
+  auto &ctx = mod.getContext();
+  auto *i64_type = Type::getInt64Ty(ctx);
+  auto *ptr_type = PointerType::getUnqual(ctx);
+  auto *section_globals_type = StructType::create(
+      ctx, {ptr_type, i64_type, i64_type}, "struct.bleach_section_t", false);
+  std::vector<Constant *> struct_constants;
+  struct_constants.reserve(sections.size());
+  for (const auto &section : sections) {
+    assert(section.size);
+    auto *size_const = section.size->getInitializer();
+    auto *start_const = section.start->getInitializer();
+    auto *data_ptr = section.ptr->getInitializer();
+    Constant *struct_val = ConstantStruct::get(
+        section_globals_type, {data_ptr, start_const, size_const});
+
+    struct_constants.push_back(struct_val);
   }
 
-  return global_section;
+  ArrayType *array_type = ArrayType::get(section_globals_type, sections.size());
+  Constant *array_constant = ConstantArray::get(array_type, struct_constants);
+
+  GlobalVariable *global_array =
+      new GlobalVariable(mod, array_type,
+                         /*isConstant=*/true, GlobalValue::InternalLinkage,
+                         array_constant, "bleach_section_globals", nullptr,
+                         GlobalVariable::NotThreadLocal, 0, false);
+
+  global_array->setAlignment(Align(8));
+  return global_array;
+}
+static Function *create_addr_lookup_func(Module &mod,
+                                         GlobalVariable *sections_array,
+                                         std::size_t sections_count) {
+  LLVMContext &ctx = mod.getContext();
+  IRBuilder<> builder(ctx);
+  auto *i64_type = Type::getInt64Ty(ctx);
+  auto *ptr_type = PointerType::getUnqual(ctx);
+  auto *func_type = FunctionType::get(ptr_type, {i64_type}, false);
+  auto *func = mod.getFunction("bleach_try_get_real_addr");
+  if (!func)
+    func = Function::Create(func_type, GlobalValue::ExternalLinkage,
+                            "bleach_try_get_real_addr", &mod);
+  auto *entry_block = BasicBlock::Create(ctx, "entry", func);
+  builder.SetInsertPoint(entry_block);
+  auto *addr_arg = func->arg_begin();
+  auto *i8_ptr_type = builder.getPtrTy();
+  auto *sections_ptr = ConstantExpr::getBitCast(sections_array, i8_ptr_type);
+  auto *count_const = ConstantInt::get(i64_type, sections_count);
+  auto *impl_type =
+      FunctionType::get(ptr_type, {i64_type, i8_ptr_type, i64_type}, false);
+  auto impl_callee =
+      mod.getOrInsertFunction("bleach_try_get_real_addr_impl", impl_type);
+  auto *result =
+      builder.CreateCall(impl_callee, {addr_arg, sections_ptr, count_const});
+  builder.CreateRet(result);
+  return func;
 }
 
 StructType &create_state_type(LLVMContext &ctx, const register_stats &stats,
@@ -1221,6 +1294,21 @@ static void print_state_header(std::ostream &os, std::span<Function *> funcs,
   save_function_declarations(os, funcs);
 }
 
+static void link_ir_module(Module &m, StringRef ir_module,
+                           StringRef module_name) {
+  SmallVector<char> ir_buf(ir_module.begin(), ir_module.end());
+  auto mem_buf = SmallVectorMemoryBuffer(std::move(ir_buf), module_name);
+  SMDiagnostic err;
+  auto extra = parseIR(mem_buf, err, m.getContext());
+  if (!extra) {
+    std::string err_str;
+    raw_string_ostream ss(err_str);
+    err.print(module_name.str().data(), ss);
+    throw std::runtime_error("Failed to parse LLVM IR" + err_str);
+  }
+  Linker::linkModules(m, std::move(extra));
+}
+
 Module &bleach_module(Module &m, MachineModuleInfo &mmi,
                       std::span<mctomir::translated_function> trfinfo,
                       const instr_impl &instrs,
@@ -1266,9 +1354,12 @@ Module &bleach_module(Module &m, MachineModuleInfo &mmi,
 
   create_bleach_symtab_add_function_decl(m);
   create_bleach_symtab_lookup_function_decl(m);
-  std::vector<GlobalVariable *> section_globals(sections.size());
+  std::vector<section_globals> section_globals(sections.size());
   ranges::transform(sections, section_globals.begin(),
-                    [&m](auto &s) { return create_section_global(m, s); });
+                    [&m](auto &s) { return create_section_globals(m, s); });
+  auto *sections_array = create_sections_array_global(m, section_globals);
+  [[maybe_unused]] auto *addr_lookup_func =
+      create_addr_lookup_func(m, sections_array, sections.size());
   auto &state = create_state_type(m.getContext(), reg_stats, stack_size);
   for (auto &&[oldf, func_info] : funcs) {
     auto found =
@@ -1287,22 +1378,12 @@ Module &bleach_module(Module &m, MachineModuleInfo &mmi,
          translated | views::filter([](auto *f) { return !f->empty(); }))
       fill_symtab_at(func, translated, *finfo);
   }
-  if (finfo) {
-    SmallVector<char> ir_buf(symtab_ir_string.begin(), symtab_ir_string.end());
-    auto mem_buf = SmallVectorMemoryBuffer(std::move(ir_buf), "symtab-ir.ll");
-    SMDiagnostic err;
-    auto extra = parseIR(mem_buf, err, m.getContext());
-    if (!extra) {
-      std::string err_str;
-      raw_string_ostream ss(err_str);
-      err.print("symtab.ll", ss);
-      throw std::runtime_error("Failed to parse LLVM IR" + err_str);
-    }
-    Linker::linkModules(m, std::move(extra));
-  }
+  if (finfo)
+    link_ir_module(m, symtab_ir_string, "symtab-ir.ll");
+  link_ir_module(m, section_intrinsics_ir_string, "section-intrinsics-ir.ll");
   // rename functions
   for (auto *func : translated)
-    func->setName(std::format("{}{}", lifted_prefix, func->getName().data()));
+    func->setName(lifted_prefix + func->getName().str());
   // create state struct and generate header
   if (!state_struct_file.empty()) {
     if (state_struct_file == "-") {
