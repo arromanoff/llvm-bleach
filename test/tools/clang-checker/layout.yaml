@@ -1,5 +1,5 @@
 options:
-  march: riscv64-unknown-elf
+  march: riscv64
   mattr: "+m,+f,+d"
   honor-target-abi: on
   model-plugin: None
