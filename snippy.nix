@@ -11,13 +11,13 @@
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "llvm-snippy";
-  version = "2.1.0";
+  version = "3.0.0";
 
   src = pkgs.fetchFromGitHub {
     owner = "LLVM-Snippy";
     repo = "llvm-snippy";
-    rev = "169f6df67fd0b2acc661b4e0cb95e090ecc1bdad";
-    hash = "sha256-chFUH/aVGAsLc7s7HgSP5iVFcNsEK9J9eWdxpz6C3GY=";
+    rev = "794b293be118fee81c00aaa2d48a1c029d75c66c";
+    hash = "sha256-N4SwHy+yu8TKqaKXue39HWOHqVyY7Sx2s8tw8y4bDRc=";
   };
   patches = [ ./nix/llvm-ie-linker.patch ];
 
@@ -39,7 +39,7 @@ stdenv.mkDerivation (finalAttrs: {
     (lib.cmakeBool "LLVM_INCLUDE_UTILS" finalAttrs.finalPackage.doCheck)
     (lib.cmakeBool "LLVM_INCLUDE_TESTS" finalAttrs.finalPackage.doCheck)
     (lib.cmakeBool "LLVM_INCLUDE_BENCHMARKS" false)
-    (lib.cmakeFeature "LLVM_TARGETS_TO_BUILD" "RISCV")
+    (lib.cmakeFeature "LLVM_TARGETS_TO_BUILD" "RISCV;AArch64")
     (lib.cmakeFeature "LLVM_ENABLE_PROJECTS" "lld")
   ];
 
