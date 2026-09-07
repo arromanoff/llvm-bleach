@@ -8,6 +8,10 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    snippy = {
+      url = "github:LLVM-Snippy/llvm-snippy";
+      flake = false;
+    };
   };
 
   outputs =
@@ -16,6 +20,7 @@
       nixpkgs,
       flake-parts,
       treefmt-nix,
+      snippy,
       ...
     }@inputs:
     let
@@ -58,6 +63,7 @@
             in
             rec {
               llvm-bleach = normalPkgs.callPackage ./. {
+                stdenv = normalPkgs.gcc16Stdenv;
                 inherit self;
                 inherit llvmPackages;
                 inherit llvmSnippy;
@@ -66,6 +72,7 @@
               };
               llvm-bleach-static = staticPkgs.callPackage ./. {
                 inherit llvmPackages;
+                stdenv = staticPkgs.gcc16Stdenv;
                 llvmLib = staticPkgs.llvmPackages_21.llvm;
                 clangCompiler = normalPkgs.clang;
                 inherit llvmSnippy;
@@ -82,10 +89,11 @@
                   ;
               };
               default = llvm-bleach;
-              llvmSnippy = pkgs.callPackage ./snippy.nix {
-                stdenv = llvmPackages.stdenv;
+              llvmSnippy = import ./nix/snippy.nix {
+                pkgs = normalPkgs;
+                inherit snippy;
               };
-            };
+          };
           checks = {
             inherit (packages) llvm-bleach;
           };
