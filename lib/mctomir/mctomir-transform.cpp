@@ -1,6 +1,5 @@
 #include "mctomir/mctomir-transform.h"
 
-#include <cstdint>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/CodeGen/GlobalISel/GISelValueTracking.h>
@@ -21,8 +20,9 @@
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/SubtargetFeature.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <iostream>
-#include <ranges>
 #include <set>
 #include <stdexcept>
 #include <string_view>
@@ -30,7 +30,6 @@
 namespace mctomir {
 using namespace llvm;
 namespace ranges = std::ranges;
-namespace views = std::views;
 
 Error translator_t::initialize(StringRef triple_name,
                                SubtargetFeatures features) {
@@ -332,12 +331,11 @@ MachineInstr *translator_t::create_machine_instr(const translated_inst &tinst,
       mib.addMBB(target_it->second);
       mbb->addSuccessor(target_it->second);
       return mib.getInstr();
-    } else {
-      std::string instr;
-      raw_string_ostream ss(instr);
-      std::cerr << "Warning: destination not found for instruction:\n\t"
-                << instr << '\n';
     }
+    std::string instr;
+    raw_string_ostream ss(instr);
+    std::cerr << "Warning: destination not found for instruction:\n\t" << instr
+              << '\n';
   }
   MachineInstrBuilder mib = BuildMI(*mbb, mbb->end(), DebugLoc(), desc);
 

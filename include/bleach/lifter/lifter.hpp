@@ -102,7 +102,7 @@ public:
   using vector::size;
   using vector::operator[];
 
-  template <typename It> register_stats(It start, It finish) {
+  template <std::input_iterator It> register_stats(It start, It finish) {
     for (; start != finish; ++start)
       vector::emplace_back(std::string(start->name), Regex(start->regex));
   }
