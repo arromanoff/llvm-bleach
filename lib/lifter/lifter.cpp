@@ -6,8 +6,6 @@
 #include "section_intrinsics-ir.h"
 #include "symtab-ir.h"
 
-#include <algorithm>
-#include <iterator>
 #include <llvm/CodeGen/MachineFunction.h>
 #include <llvm/CodeGen/MachineModuleInfo.h>
 #include <llvm/CodeGen/MachineRegisterInfo.h>
@@ -30,13 +28,13 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 
-#include <expected>
+#include <algorithm>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <ranges>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 
 namespace bleach::lifter {
@@ -101,8 +99,8 @@ static void replace_uses_of_block_with(MachineBasicBlock &mbb,
   mbb.replaceSuccessor(&old_block, &new_block);
 }
 
-void create_basic_blocks_for_mfunc(MachineFunction &src, MachineFunction &dst,
-                                   mbb2bb &m2b) {
+static void create_basic_blocks_for_mfunc(MachineFunction &src,
+                                          MachineFunction &dst, mbb2bb &m2b) {
   std::unordered_map<MachineBasicBlock *, MachineBasicBlock *> block_map;
   // One cannot simply loop over mfunc as we insert new blocks into it
   for (auto &mbb : src) {
@@ -133,7 +131,7 @@ void create_basic_blocks_for_mfunc(MachineFunction &src, MachineFunction &dst,
   }));
 }
 
-void fill_module_with_instrs(Module &m, const instr_impl &instrs) {
+static void fill_module_with_instrs(Module &m, const instr_impl &instrs) {
   assert(!instrs.empty());
   auto first = CloneModule(*instrs.begin()->ir_module);
   for (auto &&i : drop_begin(instrs)) {
@@ -145,13 +143,14 @@ void fill_module_with_instrs(Module &m, const instr_impl &instrs) {
   Linker::linkModules(m, std::move(first));
 }
 
-auto get_current_state(Function &func) -> Value * {
+static auto get_current_state(Function &func) -> Value * {
   constexpr auto gpr_array_idx = 0u;
   return func.getArg(gpr_array_idx);
 }
 
-void materialize_registers(MachineFunction &mf, Function &func, reg2vals &rmap,
-                           StructType &state, const register_stats &reg_stats) {
+static void materialize_registers(MachineFunction &mf, Function &func,
+                                  reg2vals &rmap, StructType &state,
+                                  const register_stats &reg_stats) {
   if (mf.empty())
     return;
   auto &ctx = func.getContext();
@@ -194,7 +193,7 @@ void materialize_registers(MachineFunction &mf, Function &func, reg2vals &rmap,
 static std::string bleach_symtab_lookup_name = "bleach_symtab_lookup";
 static std::string bleach_symtab_add_name = "bleach_symtab_add";
 
-auto *create_bleach_symtab_add_function_decl(Module &m) {
+static auto *create_bleach_symtab_add_function_decl(Module &m) {
   auto &ctx = m.getContext();
   auto *ret_type = Type::getVoidTy(ctx);
   auto *ptr_type = PointerType::getUnqual(ctx);
@@ -205,7 +204,7 @@ auto *create_bleach_symtab_add_function_decl(Module &m) {
                           bleach_symtab_add_name, m);
 }
 
-auto *create_bleach_symtab_lookup_function_decl(Module &m) {
+static auto *create_bleach_symtab_lookup_function_decl(Module &m) {
   auto &ctx = m.getContext();
   auto *ptr_type = PointerType::getUnqual(ctx);
   auto *addr_type = Type::getInt64Ty(ctx);
@@ -213,7 +212,7 @@ auto *create_bleach_symtab_lookup_function_decl(Module &m) {
   return Function::Create(ftype, Function::ExternalLinkage,
                           bleach_symtab_lookup_name, m);
 }
-auto *generate_function_object(Module &m, MachineFunction &mf) {
+static auto *generate_function_object(Module &m, MachineFunction &mf) {
   auto *ret_type = mf.getFunction().getFunctionType()->getReturnType();
   ret_type = Type::getVoidTy(m.getContext());
   auto *func_type = FunctionType::get(
@@ -226,9 +225,9 @@ auto *generate_function_object(Module &m, MachineFunction &mf) {
   return func;
 }
 
-void save_registers(BasicBlock &block, BasicBlock::iterator pos, reg2vals &rmap,
-                    const TargetMachine &tmachine, StructType &state,
-                    const register_stats &reg_stats) {
+static void save_registers(BasicBlock &block, BasicBlock::iterator pos,
+                           reg2vals &rmap, const TargetMachine &tmachine,
+                           StructType &state, const register_stats &reg_stats) {
   auto &ctx = block.getContext();
   auto *stinfo = tmachine.getSubtargetImpl(*block.getParent());
   assert(stinfo);
@@ -261,9 +260,9 @@ void save_registers(BasicBlock &block, BasicBlock::iterator pos, reg2vals &rmap,
   }
 }
 
-void load_registers(BasicBlock &block, BasicBlock::iterator pos, reg2vals &rmap,
-                    const TargetMachine &tmachine, StructType &state,
-                    const register_stats &reg_stats) {
+static void load_registers(BasicBlock &block, BasicBlock::iterator pos,
+                           reg2vals &rmap, const TargetMachine &tmachine,
+                           StructType &state, const register_stats &reg_stats) {
   auto &ctx = block.getContext();
   auto *stinfo = tmachine.getSubtargetImpl(*block.getParent());
   assert(stinfo);
@@ -296,10 +295,10 @@ void load_registers(BasicBlock &block, BasicBlock::iterator pos, reg2vals &rmap,
   }
 }
 
-void save_registers_before_return(Function &func, reg2vals &rmap,
-                                  const TargetMachine &tmachine,
-                                  StructType &state,
-                                  const register_stats &reg_stats) {
+static void save_registers_before_return(Function &func, reg2vals &rmap,
+                                         const TargetMachine &tmachine,
+                                         StructType &state,
+                                         const register_stats &reg_stats) {
   for (auto &block : func) {
     auto ret = ranges::find_if(
         block, [](auto &inst) { return isa<ReturnInst>(inst); });
@@ -309,8 +308,8 @@ void save_registers_before_return(Function &func, reg2vals &rmap,
   }
 }
 
-void fill_symtab_at(Function *func, ArrayRef<Function *> funcs,
-                    const mctomir::file_info &finfo) {
+static void fill_symtab_at(Function *func, ArrayRef<Function *> funcs,
+                           const mctomir::file_info &finfo) {
   auto *m = func->getParent();
   auto *symtab_add = m->getFunction(bleach_symtab_add_name);
   assert(symtab_add);
@@ -327,8 +326,8 @@ void fill_symtab_at(Function *func, ArrayRef<Function *> funcs,
   }
 }
 
-std::optional<unsigned> find_register_by_name(const MCRegisterInfo *reg_info,
-                                              StringRef name) {
+static std::optional<unsigned>
+find_register_by_name(const MCRegisterInfo *reg_info, StringRef name) {
   for (auto &&rclass : reg_info->regclasses()) {
     auto reg_it = ranges::find_if(
         rclass, [&](auto &reg) { return name == reg_info->getName(reg); });
@@ -342,12 +341,13 @@ struct clone_function_result final {
   MachineFunction *mfunc = nullptr;
 };
 
-auto generate_function(MachineFunction &mf,
-                       const mctomir::translated_function *trfinfo,
-                       clone_function_result &dst_info,
-                       const instr_impl &instrs, MachineModuleInfo &mmi,
-                       StructType &state, const register_stats &reg_stats,
-                       bool functions_nop) {
+static auto generate_function(MachineFunction &mf,
+                              const mctomir::translated_function *trfinfo,
+                              clone_function_result &dst_info,
+                              const instr_impl &instrs, MachineModuleInfo &mmi,
+                              StructType &state,
+                              const register_stats &reg_stats,
+                              bool functions_nop) {
   reg2vals rmap;
   auto &func = dst_info.mfunc->getFunction();
   materialize_registers(mf, func, rmap, state, reg_stats);
@@ -368,8 +368,8 @@ auto generate_function(MachineFunction &mf,
   save_registers_before_return(func, rmap, tmachine, state, reg_stats);
 }
 
-std::string get_instruction_name(const MachineInstr &minst,
-                                 const MCInstrInfo &instr_info) {
+static std::string get_instruction_name(const MachineInstr &minst,
+                                        const MCInstrInfo &instr_info) {
   return instr_info.getName(minst.getOpcode()).str();
 }
 
@@ -491,8 +491,9 @@ static Function *create_addr_lookup_func(Module &mod,
   return func;
 }
 
-StructType &create_state_type(LLVMContext &ctx, const register_stats &stats,
-                              size_t stack_size_bytes) {
+static StructType &create_state_type(LLVMContext &ctx,
+                                     const register_stats &stats,
+                                     size_t stack_size_bytes) {
 
   std::vector<Type *> members;
   ranges::transform(stats, std::back_inserter(members), [&ctx](auto &rclass) {
@@ -514,8 +515,8 @@ StructType &create_state_type(LLVMContext &ctx, const register_stats &stats,
   return *struct_type;
 }
 
-auto clone_machine_function(Module &m, MachineModuleInfo &mmi,
-                            MachineFunction &mfunc) {
+static auto clone_machine_function(Module &m, MachineModuleInfo &mmi,
+                                   MachineFunction &mfunc) {
   auto *new_func = generate_function_object(m, mfunc);
   assert(new_func);
   auto &new_mfunc = mmi.getOrCreateMachineFunction(*new_func);
@@ -525,9 +526,9 @@ auto clone_machine_function(Module &m, MachineModuleInfo &mmi,
   return res;
 }
 
-void collect_register_stats_for(const MachineFunction &mf,
-                                const TargetMachine &tmachine,
-                                register_stats &stats) {
+static void collect_register_stats_for(const MachineFunction &mf,
+                                       const TargetMachine &tmachine,
+                                       register_stats &stats) {
   auto *stinfo = tmachine.getSubtargetImpl(mf.getFunction());
   assert(stinfo);
   auto *rinfo = stinfo->getRegisterInfo();
@@ -550,8 +551,8 @@ void collect_register_stats_for(const MachineFunction &mf,
   }
 }
 
-void assign_register_classes(const TargetSubtargetInfo &stinfo,
-                             register_stats &stats) {
+static void assign_register_classes(const TargetSubtargetInfo &stinfo,
+                                    register_stats &stats) {
   auto *rinfo = stinfo.getRegisterInfo();
   assert(rinfo);
   for (auto &&[idx, reg_class] : enumerate(stats)) {
@@ -573,8 +574,8 @@ void assign_register_classes(const TargetSubtargetInfo &stinfo,
   }
 }
 
-register_stats collect_register_stats(const instr_impl &instr, Module &m,
-                                      MachineModuleInfo &mmi) {
+static register_stats collect_register_stats(const instr_impl &instr, Module &m,
+                                             MachineModuleInfo &mmi) {
   auto &rclasses = instr.get_regclasses();
   if (rclasses.empty())
     throw std::runtime_error(
@@ -641,8 +642,8 @@ static void print_state_struct_definition(std::ostream &os,
   os << "};";
 }
 
-auto generate_jump(const MachineInstr &minst, IRBuilder<> &builder,
-                   const mbb2bb &m2b) -> Instruction * {
+static auto generate_jump(const MachineInstr &minst, IRBuilder<> &builder,
+                          const mbb2bb &m2b) -> Instruction * {
   auto mbb_op =
       llvm::find_if(minst.operands(), [](auto &op) { return op.isMBB(); });
   if (minst.getIterator() != minst.getParent()->begin()) {
@@ -657,7 +658,7 @@ auto generate_jump(const MachineInstr &minst, IRBuilder<> &builder,
   return builder.CreateBr(target_bb);
 }
 
-auto get_if_true_block(const MachineInstr &minst, const mbb2bb &m2b)
+static auto get_if_true_block(const MachineInstr &minst, const mbb2bb &m2b)
     -> BasicBlock * {
   assert(minst.isConditionalBranch());
   auto &op = minst.getOperand(2);
@@ -665,7 +666,7 @@ auto get_if_true_block(const MachineInstr &minst, const mbb2bb &m2b)
   return m2b[op.getMBB()];
 }
 
-auto get_if_false_block(const MachineInstr &minst, const mbb2bb &m2b)
+static auto get_if_false_block(const MachineInstr &minst, const mbb2bb &m2b)
     -> BasicBlock * {
 
   assert(minst.isConditionalBranch());
@@ -683,10 +684,10 @@ auto get_if_false_block(const MachineInstr &minst, const mbb2bb &m2b)
   return m2b[std::addressof(*std::next(minst.getParent()->getIterator()))];
 }
 
-auto operand_to_value(const MachineOperand &mop, BasicBlock &block,
-                      const TargetMachine &tmachine, reg2vals &rmap,
-                      const register_stats &reg_stats, const instr_impl &insts)
-    -> Value * {
+static auto operand_to_value(const MachineOperand &mop, BasicBlock &block,
+                             const TargetMachine &tmachine, reg2vals &rmap,
+                             const register_stats &reg_stats,
+                             const instr_impl &insts) -> Value * {
   IRBuilder builder(block.getContext());
   builder.SetInsertPoint(&block);
   if (mop.isReg()) {
@@ -721,11 +722,10 @@ auto operand_to_value(const MachineOperand &mop, BasicBlock &block,
   throw std::runtime_error("Unsupported operand type");
 }
 
-auto generate_indirect_branch(Module &m, BasicBlock &bb,
-                              const MachineInstr &minst, IRBuilder<> &builder,
-                              const TargetMachine &tmachine, reg2vals &rmap,
-                              StructType &state, const register_stats &rstats,
-                              const instr_impl &insts) -> Instruction * {
+static auto generate_indirect_branch(
+    Module &m, BasicBlock &bb, const MachineInstr &minst, IRBuilder<> &builder,
+    const TargetMachine &tmachine, reg2vals &rmap, StructType &state,
+    const register_stats &rstats, const instr_impl &insts) -> Instruction * {
   auto *symtab_lookup = m.getFunction(bleach_symtab_lookup_name);
   assert(symtab_lookup);
   auto op_to_val = [&](auto &mop) {
@@ -753,11 +753,11 @@ auto generate_indirect_branch(Module &m, BasicBlock &bb,
   return call;
 }
 
-auto generate_branch(const MachineInstr &minst, BasicBlock &bb,
-                     IRBuilder<> &builder, reg2vals &rmap,
-                     const TargetMachine &target_machine, const mbb2bb &m2b,
-                     const register_stats &reg_stats, const instr_impl &insts)
-    -> Instruction * {
+static auto generate_branch(const MachineInstr &minst, BasicBlock &bb,
+                            IRBuilder<> &builder, reg2vals &rmap,
+                            const TargetMachine &target_machine,
+                            const mbb2bb &m2b, const register_stats &reg_stats,
+                            const instr_impl &insts) -> Instruction * {
   auto *iinfo = target_machine.getMCInstrInfo();
   auto name = get_instruction_name(minst, *iinfo);
   auto *m = bb.getParent()->getParent();
@@ -876,17 +876,18 @@ static auto generate_call(const MachineInstr &minst, IRBuilder<> &builder,
   return call;
 }
 
-std::optional<unsigned> get_stack_pointer(const instr_impl &instrs,
-                                          const TargetMachine &tmachine) {
+static std::optional<unsigned>
+get_stack_pointer(const instr_impl &instrs, const TargetMachine &tmachine) {
   auto *reg_info = tmachine.getMCRegisterInfo();
   auto sp_reg = find_register_by_name(reg_info, instrs.get_stack_pointer());
   return sp_reg;
 }
 
-auto get_stack_pointer_value(const instr_impl &instrs, reg2vals &rmap,
-                             IRBuilder<> &builder,
-                             const TargetMachine &tmachine,
-                             const register_stats &reg_stats) -> Value * {
+static auto get_stack_pointer_value(const instr_impl &instrs, reg2vals &rmap,
+                                    IRBuilder<> &builder,
+                                    const TargetMachine &tmachine,
+                                    const register_stats &reg_stats)
+    -> Value * {
   auto sp_reg = get_stack_pointer(instrs, tmachine);
   if (!sp_reg)
     throw std::runtime_error("Could not find stack pointer under the name \"" +
@@ -966,7 +967,7 @@ static auto generate_load_store_from_stack(
   return inserted;
 }
 
-auto generate_stack_pointer_modification(
+static auto generate_stack_pointer_modification(
     const MachineInstr &minst, IRBuilder<> &builder, BasicBlock &bb,
     const TargetMachine &tmachine, reg2vals &rmap, const instr_impl &instrs,
     const register_stats &reg_stats) -> Value * {
@@ -1006,8 +1007,8 @@ auto generate_stack_pointer_modification(
 
 // Operation is considered a stack manipulation if it is a load or store and
 // its source register is stack pointer
-bool is_stack_manipulation(const MachineInstr &minst,
-                           stack_pointer_tracker &sptrack) {
+static bool is_stack_manipulation(const MachineInstr &minst,
+                                  stack_pointer_tracker &sptrack) {
   if (!minst.mayLoadOrStore())
     return false;
   auto operands = minst.uses();
@@ -1129,7 +1130,7 @@ static bool is_pc_relative(const MachineInstr &minst, const instr_impl &instrs,
   return instr->is_pc_relative;
 }
 
-auto generate_instruction(
+static auto generate_instruction(
     const MachineInstr &minst, std::optional<uint64_t> addr, BasicBlock &bb,
     IRBuilder<> &builder, reg2vals &rmap, const instr_impl &instrs,
     const TargetMachine &target_machine, const mbb2bb &m2b, StructType &state,

@@ -16,8 +16,8 @@ template <> struct convert<mctomir::function_symbol> {
     return node;
   }
 };
-YAML::Emitter &operator<<(YAML::Emitter &out,
-                          const mctomir::function_symbol &func) {
+static YAML::Emitter &operator<<(YAML::Emitter &out,
+                                 const mctomir::function_symbol &func) {
   out << YAML::convert<mctomir::function_symbol>::encode(func);
   return out;
 }

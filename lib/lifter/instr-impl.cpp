@@ -12,8 +12,6 @@
 #include <yaml-cpp/emittermanip.h>
 #include <yaml-cpp/yaml.h>
 
-#include <iostream>
-
 namespace bleach::lifter {
 
 struct normalized_instruction final {
@@ -105,7 +103,6 @@ instruction denormalize_instruction(const normalized_instruction &norm,
   }
   return instr;
 }
-} // namespace
 
 YAML::Emitter &operator<<(YAML::Emitter &out, const instruction &instr) {
   out << YAML::convert<normalized_instruction>::encode(instr);
@@ -116,6 +113,7 @@ YAML::Emitter &operator<<(YAML::Emitter &out, const instr_impl &instrs) {
   out << YAML::convert<instr_impl>::encode(instrs);
   return out;
 }
+} // namespace
 
 std::string save_to_yaml(const instr_impl &instrs) {
   YAML::Emitter out;
