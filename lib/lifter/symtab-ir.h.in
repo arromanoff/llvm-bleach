@@ -1,6 +1,0 @@
-#pragma once
-
-#include <string>
-namespace bleach {
-namespace lifter {
-static inline std::string symtab_ir_string = R"(
