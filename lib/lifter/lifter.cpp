@@ -3,9 +3,6 @@
 #include "mctomir/mctomir-transform.h"
 #include "mctomir/symbols.h"
 
-#include "section_intrinsics-ir.h"
-#include "symtab-ir.h"
-
 #include <llvm/CodeGen/MachineFunction.h>
 #include <llvm/CodeGen/MachineModuleInfo.h>
 #include <llvm/CodeGen/MachineRegisterInfo.h>
@@ -1309,6 +1306,14 @@ static void link_ir_module(Module &m, StringRef ir_module,
   }
   Linker::linkModules(m, std::move(extra));
 }
+
+static inline std::string symtab_ir_string = {
+#embed "symtab.ll"
+};
+
+static inline std::string section_intrinsics_ir_string = {
+#embed "section-intrinsics.ll"
+};
 
 Module &bleach_module(Module &m, MachineModuleInfo &mmi,
                       std::span<mctomir::translated_function> trfinfo,
