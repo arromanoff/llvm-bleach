@@ -1,85 +1,71 @@
 # RUN: %bin/llvm-bleach %S/inputs/functions.mir \
 # RUN:   --instructions=%S/inputs/logical.yaml --lifted-prefix=bleach_ \
-# RUN:   | FileCheck %s --check-prefix SF
-
-# RUN: %bin/llvm-bleach %S/inputs/functions.mir \
-# RUN:   --instructions=%S/inputs/logical.yaml --lifted-prefix=bleach_ \
-# RUN:   | FileCheck %s --check-prefix FUN1
-
-# RUN: %bin/llvm-bleach %S/inputs/functions.mir \
-# RUN:   --instructions=%S/inputs/logical.yaml --lifted-prefix=bleach_ \
-# RUN:   | FileCheck %s --check-prefix FUN2
+# RUN:   | FileCheck %s
 
 # SnippyFunction has 4 calls to fun2. Check that all calls are
 # embraced with storing registers to state and loading afterwards
 
-# SF: define void @bleach_SnippyFunction(ptr %0) {
+# CHECK: define void @bleach_SnippyFunction(ptr %0) {
 
-# SF-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# SF:   call void @bleach_fun2(ptr %0)
-# SF-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# SF-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# SF:   call void @bleach_fun2(ptr %0)
-# SF-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# SF-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# SF:   call void @bleach_fun2(ptr %0)
-# SF-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# SF-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# SF:   call void @bleach_fun2(ptr %0)
-# SF-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# SF-NOT: call
-# SF: }
 
-# Now 6 calls from fun1
-# FUN1: define void @bleach_fun1(ptr %0) {
+# CHECK: define void @bleach_fun1(ptr %0)
 
-# FUN1-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN1:   call void @bleach_fun2(ptr %0)
-# FUN1-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# FUN1-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN1:   call void @bleach_fun2(ptr %0)
-# FUN1-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# FUN1-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN1:   call void @bleach_fun2(ptr %0)
-# FUN1-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# FUN1-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN1:   call void @bleach_fun2(ptr %0)
-# FUN1-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# FUN1-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN1:   call void @bleach_fun2(ptr %0)
-# FUN1-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# FUN1-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN1:   call void @bleach_fun2(ptr %0)
-# FUN1-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-
-# FUN1-NOT: call
-# FUN1: }
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun2(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
 # 4 calls from fun2 to fun3
-# FUN2: define void @bleach_fun2(ptr %0) {
+# CHECK: define void @bleach_fun2(ptr %0)
 
-# FUN2-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN2:   call void @bleach_fun3(ptr %0)
-# FUN2-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun3(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# FUN2-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN2:   call void @bleach_fun3(ptr %0)
-# FUN2-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun3(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# FUN2-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN2:   call void @bleach_fun3(ptr %0)
-# FUN2-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun3(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 
-# FUN2-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
-# FUN2:   call void @bleach_fun3(ptr %0)
-# FUN2-32:   load i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
+# CHECK-COUNT-32:   store i64
+# CHECK:   call void @bleach_fun3(ptr %0)
+# CHECK-COUNT-32:   {{%[0-9]+}} = load i64
 

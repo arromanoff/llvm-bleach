@@ -33,9 +33,18 @@
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Scalar/SROA.h>
 
+#include <mlir/Dialect/DLTI/DLTI.h>
+#include <mlir/Dialect/LLVMIR/LLVMDialect.h>
+#include <mlir/IR/BuiltinOps.h>
+#include <mlir/IR/MLIRContext.h>
+#include <mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMIRToLLVMTranslation.h> // For registration
+#include <mlir/Target/LLVMIR/Import.h>
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <meta>
+#include <type_traits>
 #include <utility>
 
 using namespace llvm;
@@ -93,6 +102,50 @@ static cl::opt<std::string> output_filename("o",
                                             cl::desc("Output LLVM IR file"),
                                             cl::value_desc("filename"),
                                             cl::init("-"), cl::cat(options));
+
+namespace meta = std::meta;
+// FIXME: custom tolower because std::tolower is not constexpr
+constexpr char to_lower(char c) {
+  return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
+}
+consteval std::string_view to_lowercase(std::string_view input) {
+  std::string res(input.size(), '\0');
+  std::transform(input.begin(), input.end(), res.begin(),
+                 [](unsigned char c) { return to_lower(c); });
+  return std::define_static_string(res);
+}
+
+template <typename E>
+  requires std::is_enum_v<E>
+consteval std::string_view to_string(E value) {
+  auto found = ranges::find_if(meta::enumerators_of(^^E),
+                               [&](auto &e) { return value == [:e:]; });
+  return to_lowercase(meta::identifier_of(*found));
+}
+
+// reflection-aware alternative for cl::values
+template <typename E>
+  requires std::is_enum_v<E>
+struct cl_enum_values {
+  template <class Opt> void apply(Opt &o) const {
+    template for (constexpr auto e :
+                  std::define_static_array(meta::enumerators_of(^^E)))
+        o.getParser()
+            .addLiteralOption(
+                std::define_static_string(to_lowercase(meta::identifier_of(e))),
+                [:e:], std::define_static_string(meta::identifier_of(e)));
+  }
+};
+
+enum output_type_t {
+  LLVM,
+  MLIRLLVM,
+};
+
+static cl::opt<output_type_t> output_type("t", cl::desc("Output type:"),
+                                          cl::init(output_type_t::LLVM),
+                                          cl_enum_values<output_type_t>(),
+                                          cl::cat(options));
 
 namespace {
 
@@ -253,15 +306,41 @@ auto main(int argc, char **argv) -> int try {
       createModuleToFunctionPassAdaptor(SROAPass(SROAOptions::PreserveCFG)));
   mpm.addPass(VerifierPass(false));
   mpm.run(*m, mam);
-  if (output_filename == "-")
-    m->print(outs(), nullptr);
-  else {
-    std::error_code errc = {};
-    llvm::raw_fd_ostream fs(output_filename, errc);
-    if (errc)
-      throw std::runtime_error(errc.message());
-    m->print(fs, nullptr);
+  if (output_type == output_type_t::LLVM) {
+    if (output_filename == "-")
+      m->print(outs(), nullptr);
+    else {
+      std::error_code errc = {};
+      llvm::raw_fd_ostream fs(output_filename, errc);
+      if (errc)
+        throw std::runtime_error(errc.message());
+      m->print(fs, nullptr);
+    }
+  } else {
+    // MLIR conversion part
+    mlir::MLIRContext context;
+    mlir::DialectRegistry registry;
+    mlir::registerLLVMDialectImport(registry);
+    registry.insert<mlir::DLTIDialect>();
+    registry.insert<mlir::LLVM::LLVMDialect>();
+    context.appendDialectRegistry(registry);
+    context.loadDialect<mlir::LLVM::LLVMDialect>();
+    mlir::OwningOpRef<mlir::ModuleOp> mlir_module =
+        mlir::translateLLVMIRToModule(std::move(m), &context);
+    if (!mlir_module)
+      throw std::runtime_error(
+          "Failed to translate LLVM IR to MLIR LLVM dialect");
+    if (output_filename == "-") {
+      mlir_module->print(outs());
+    } else {
+      std::error_code errc = {};
+      llvm::raw_fd_ostream fs(output_filename, errc);
+      if (errc)
+        throw std::runtime_error(errc.message());
+      mlir_module->print(fs);
+    }
   }
+
   mam.clear();
   fam.clear();
   cgam.clear();

@@ -68,6 +68,8 @@ endfunction()
 
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+find_package(MLIR REQUIRED CONFIG)
+message(STATUS "Found MLIR ${MLIR_VERSION}")
 
 function(bleach_add_llvm_based_tool target_name)
   set(options_args SHARED)
@@ -77,8 +79,22 @@ function(bleach_add_llvm_based_tool target_name)
   bleach_add_executable(${target_name} SOURCES ${ARGUMENTS_SOURCES})
   enable_warnings(${target_name})
   llvm_map_components_to_libnames(LLVM_LIBRARIES ${ARGUMENTS_LLVM_COMPONENTS})
-  target_link_libraries(${target_name} PUBLIC ${LLVM_LIBRARIES})
+  set(MLIR_LIBRARIES
+    MLIRIR
+    MLIRSupport
+    MLIRParser
+    MLIRPass
+    MLIRTransforms
+    MLIRLLVMDialect
+    MLIRLLVMIRToLLVMTranslation
+    MLIRDLTIDialect
+
+  )
+  list(APPEND ALL_LIBRARIES ${MLIR_LIBRARIES})
+  list(APPEND ALL_LIBRARIES ${LLVM_LIBRARIES})
+  target_link_libraries(${target_name} PUBLIC ${ALL_LIBRARIES})
   target_compile_features(${target_name} PUBLIC cxx_std_26)
+  target_compile_options(${target_name} PUBLIC -freflection)
 endfunction()
 
 function(bleach_add_llvm_based_lib target_name)
@@ -93,9 +109,19 @@ function(bleach_add_llvm_based_lib target_name)
   endif()
   enable_warnings(${target_name})
   llvm_map_components_to_libnames(LLVM_LIBRARIES ${ARGUMENTS_LLVM_COMPONENTS})
-  target_link_libraries(${target_name} PUBLIC ${LLVM_LIBRARIES})
+  set(MLIR_LIBRARIES
+    MLIRIR
+    MLIRSupport
+    MLIRParser
+    MLIRPass
+    MLIRTransforms
+  )
+  list(APPEND ALL_LIBRARIES ${MLIR_LIBRARIES})
+  list(APPEND ALL_LIBRARIES ${LLVM_LIBRARIES})
+  target_link_libraries(${target_name} PUBLIC ${ALL_LIBRARIES})
   target_include_directories(${target_name} SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
   target_compile_features(${target_name} PUBLIC cxx_std_26)
+  target_compile_options(${target_name} PUBLIC -freflection)
 endfunction()
 
 add_subdirectory(include)

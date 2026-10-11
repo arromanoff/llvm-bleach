@@ -68,11 +68,13 @@
                 inherit llvmPackages;
                 inherit llvmSnippy;
                 llvmLib = llvmPackages.llvm;
+                mlir = llvmPackages.mlir;
                 clangCompiler = normalPkgs.llvmPackages_23.clang;
               };
               llvm-bleach-static = staticPkgs.callPackage ./. {
                 inherit llvmPackages;
                 stdenv = staticPkgs.gcc16Stdenv;
+                mlir = staticPkgs.llvmPackages_23.mlir;
                 llvmLib = staticPkgs.llvmPackages_23.llvm;
                 clangCompiler = normalPkgs.llvmPackages_23.clang;
                 inherit llvmSnippy;

@@ -1,0 +1,12 @@
+# RUN: %bin/llvm-bleach %S/inputs/functions.mir \
+# RUN:   --instructions=%S/inputs/logical.yaml --lifted-prefix=bleach_ \
+# RUN:   -t mlirllvm | FileCheck %s
+
+# CHECK: llvm.func @bleach_SnippyFunction
+
+# CHECK:   llvm.call @bleach_fun2
+# CHECK-COUNT-32: llvm.mlir.constant
+# CHECK-COUNT-4: llvm.call @bleach_fun2
+
+
+
