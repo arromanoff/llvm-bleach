@@ -150,7 +150,7 @@ input_mir read_or_translate_mir(const std::filesystem::path &input_file,
     if (triple.getTriple().empty()) {
       triple.setTriple(sys::getDefaultTargetTriple());
     }
-    auto tm = codegen::createTargetMachineForTriple(triple.str());
+    auto tm = codegen::createTargetMachineForTriple(triple);
     if (auto err = tm.takeError())
       throw std::runtime_error(toString(std::move(err)));
     target_machine = std::unique_ptr<TargetMachine>(
@@ -169,7 +169,7 @@ input_mir read_or_translate_mir(const std::filesystem::path &input_file,
           .mmi = std::move(machine_module_info)};
 }
 
-// remove to get read of unitialized global
+// remove to get read of uinitialized global
 codegen::RegisterCodeGenFlags cfg;
 
 } // namespace

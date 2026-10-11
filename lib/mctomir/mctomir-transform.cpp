@@ -69,7 +69,7 @@ Error translator_t::create_module_and_function(StringRef triple_name,
   Triple the_triple(Triple::normalize(triple_name));
 
   std::string err_msg;
-  const Target *the_target = TargetRegistry::lookupTarget(triple_name, err_msg);
+  const Target *the_target = TargetRegistry::lookupTarget(the_triple, err_msg);
   if (!the_target)
     return createStringError(inconvertibleErrorCode(),
                              "Cannot find target for triple %s: %s",
@@ -79,7 +79,7 @@ Error translator_t::create_module_and_function(StringRef triple_name,
   res.mod->setTargetTriple(the_triple);
 
   TargetOptions options;
-  // TODO(Ilyagavrilin): make TargetMachine initialization simplier or add more
+  // TODO(Ilyagavrilin): make TargetMachine initialization simpler or add more
   // features
   res.tmachine.reset(the_target->createTargetMachine(
       the_triple, "", features.getString(), options, std::nullopt));
@@ -354,11 +354,11 @@ void translator_t::add_operand_to_mib(MachineInstrBuilder &mib,
 
     if (is_def) {
       // Add additional flags for better output
-      uint16_t flags = RegState::Define;
+      auto flags = RegState::Define;
 
       mib.addReg(reg, flags);
     } else {
-      uint16_t flags = 0;
+      auto flags = RegState::NoFlags;
       // demo of killed instruction marking
       // TODO(Ilyagavrilin): make killed operands analysis
       if (op_idx == desc.getNumOperands() - 1) {

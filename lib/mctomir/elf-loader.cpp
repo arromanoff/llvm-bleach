@@ -152,13 +152,13 @@ Error elf_disassembler::initialize() {
   std::string triple_name = the_triple.normalize();
   std::string error;
 
-  the_target = TargetRegistry::lookupTarget(triple_name, error);
+  the_target = TargetRegistry::lookupTarget(the_triple, error);
   if (!the_target)
     return createStringError(inconvertibleErrorCode(),
                              "Unable to find target for triple %s: %s",
                              triple_name.c_str(), error.c_str());
 
-  mri.reset(the_target->createMCRegInfo(triple_name));
+  mri.reset(the_target->createMCRegInfo(the_triple));
   if (!mri)
     return createStringError(inconvertibleErrorCode(),
                              "Failed to create MCRegisterInfo for %s",
@@ -167,7 +167,7 @@ Error elf_disassembler::initialize() {
   // TODO(Ilyagavrilin): add CPU selection or remove this feature
   std::string cpu_name = "";
 
-  mai.reset(the_target->createMCAsmInfo(*mri, triple_name, MCTargetOptions()));
+  mai.reset(the_target->createMCAsmInfo(*mri, the_triple, MCTargetOptions()));
   if (!mai)
     return createStringError(inconvertibleErrorCode(),
                              "Failed to create MCAsmInfo for %s",
@@ -181,7 +181,7 @@ Error elf_disassembler::initialize() {
   }
   SubtargetFeatures features = features_or_err.get();
 
-  sti.reset(the_target->createMCSubtargetInfo(triple_name, cpu_name,
+  sti.reset(the_target->createMCSubtargetInfo(the_triple, cpu_name,
                                               features.getString()));
   if (!sti)
     return createStringError(inconvertibleErrorCode(),
@@ -194,8 +194,8 @@ Error elf_disassembler::initialize() {
                              "Failed to create MCInstrInfo for %s",
                              triple_name.c_str());
 
-  ctx =
-      std::make_unique<MCContext>(the_triple, mai.get(), mri.get(), sti.get());
+  ctx = std::make_unique<MCContext>(the_triple, *mai.get(), *mri.get(),
+                                    *sti.get());
   dis_asm.reset(the_target->createMCDisassembler(*sti, *ctx));
   if (!dis_asm)
     return createStringError(inconvertibleErrorCode(),
