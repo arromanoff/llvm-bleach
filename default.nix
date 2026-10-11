@@ -17,6 +17,7 @@
   qemu,
   llvmPackages,
   llvmLib,
+  mlir,
   llvmSnippy,
   runTests ? true,
   ...
@@ -49,6 +50,7 @@ stdenv.mkDerivation {
   ];
   buildInputs = [
     llvmLib
+    mlir
     yaml-cpp
     pandoc
   ];
