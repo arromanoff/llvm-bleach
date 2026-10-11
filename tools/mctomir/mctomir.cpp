@@ -2,6 +2,7 @@
 #include "mctomir/mctomir-transform.h"
 #include "mctomir/symbols.h"
 
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/CodeGen/Passes.h>

@@ -96,8 +96,6 @@ frameInfo:
   hasMustTailInVarArgFunc: false
   hasTailCall:     false
   localFrameSize:  0
-  savePoint:       ''
-  restorePoint:    ''
 fixedStack:      []
 stack:           []
 entry_values:    []
@@ -233,8 +231,6 @@ frameInfo:
   hasMustTailInVarArgFunc: false
   hasTailCall:     false
   localFrameSize:  0
-  savePoint:       ''
-  restorePoint:    ''
 fixedStack:      []
 stack:           []
 entry_values:    []
@@ -334,8 +330,6 @@ frameInfo:
   hasMustTailInVarArgFunc: false
   hasTailCall:     false
   localFrameSize:  0
-  savePoint:       ''
-  restorePoint:    ''
 fixedStack:      []
 stack:           []
 entry_values:    []
@@ -443,8 +437,6 @@ frameInfo:
   hasMustTailInVarArgFunc: false
   hasTailCall:     false
   localFrameSize:  0
-  savePoint:       ''
-  restorePoint:    ''
 fixedStack:      []
 stack:           []
 entry_values:    []

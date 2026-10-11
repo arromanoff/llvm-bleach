@@ -109,7 +109,8 @@ YAML::Emitter &operator<<(YAML::Emitter &out, const instruction &instr) {
   return out;
 }
 
-YAML::Emitter &operator<<(YAML::Emitter &out, const instr_impl &instrs) {
+[[maybe_unused]] YAML::Emitter &operator<<(YAML::Emitter &out,
+                                           const instr_impl &instrs) {
   out << YAML::convert<instr_impl>::encode(instrs);
   return out;
 }

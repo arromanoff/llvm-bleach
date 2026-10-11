@@ -59,7 +59,7 @@
             let
               normalPkgs = legacyPackages.bleachPkgs;
               staticPkgs = legacyPackages.bleachPkgsStatic;
-              llvmPackages = normalPkgs.llvmPackages_21;
+              llvmPackages = normalPkgs.llvmPackages_23;
             in
             rec {
               llvm-bleach = normalPkgs.callPackage ./. {
@@ -68,13 +68,13 @@
                 inherit llvmPackages;
                 inherit llvmSnippy;
                 llvmLib = llvmPackages.llvm;
-                clangCompiler = normalPkgs.clang;
+                clangCompiler = normalPkgs.llvmPackages_23.clang;
               };
               llvm-bleach-static = staticPkgs.callPackage ./. {
                 inherit llvmPackages;
                 stdenv = staticPkgs.gcc16Stdenv;
-                llvmLib = staticPkgs.llvmPackages_21.llvm;
-                clangCompiler = normalPkgs.clang;
+                llvmLib = staticPkgs.llvmPackages_23.llvm;
+                clangCompiler = normalPkgs.llvmPackages_23.clang;
                 inherit llvmSnippy;
                 inherit (normalPkgs)
                   lit

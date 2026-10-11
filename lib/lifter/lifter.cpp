@@ -324,10 +324,10 @@ static void fill_symtab_at(Function *func, ArrayRef<Function *> funcs,
 }
 
 static std::optional<unsigned>
-find_register_by_name(const MCRegisterInfo *reg_info, StringRef name) {
-  for (auto &&rclass : reg_info->regclasses()) {
+find_register_by_name(const MCRegisterInfo &reg_info, StringRef name) {
+  for (auto &&rclass : reg_info.regclasses()) {
     auto reg_it = ranges::find_if(
-        rclass, [&](auto &reg) { return name == reg_info->getName(reg); });
+        rclass, [&](auto &reg) { return name == reg_info.getName(reg); });
     if (reg_it != rclass.end())
       return *reg_it;
   }
@@ -349,7 +349,7 @@ static auto generate_function(MachineFunction &mf,
   auto &func = dst_info.mfunc->getFunction();
   materialize_registers(mf, func, rmap, state, reg_stats);
   auto &tmachine = mmi.getTarget();
-  auto *reg_info = tmachine.getMCRegisterInfo();
+  auto &reg_info = tmachine.getMCRegisterInfo();
   auto sp_reg = find_register_by_name(reg_info, instrs.get_stack_pointer());
   if (!sp_reg)
     throw std::runtime_error("Could not find stack pointer under the name \"" +
@@ -555,7 +555,7 @@ static void assign_register_classes(const TargetSubtargetInfo &stinfo,
   for (auto &&[idx, reg_class] : enumerate(stats)) {
     auto found = find_if(rinfo->regclasses(), [&reg_class](auto &rclass) {
       return all_of(reg_class, [&rclass](auto &&reg) {
-        return is_contained(*rclass, reg.first);
+        return is_contained(rclass, reg.first);
       });
     });
     if (found == rinfo->regclass_end()) {
@@ -563,8 +563,8 @@ static void assign_register_classes(const TargetSubtargetInfo &stinfo,
           "Could not find llvm register class for specified register class: " +
           std::to_string(idx));
     }
-    reg_class.set_rclass(*found, rinfo->getRegSizeInBits(**found));
-    for (auto reg : **found) {
+    reg_class.set_rclass(found, rinfo->getRegSizeInBits(*found));
+    for (auto reg : *found) {
       if (reg_class.get_regex().sub("", rinfo->getRegAsmName(reg)).empty())
         reg_class.add_reg(reg);
     }
@@ -689,9 +689,9 @@ static auto operand_to_value(const MachineOperand &mop, BasicBlock &block,
   builder.SetInsertPoint(&block);
   if (mop.isReg()) {
     auto &const_regs = insts.get_const_regs();
-    auto *reg_info = tmachine.getMCRegisterInfo();
+    auto reg_info = tmachine.getMCRegisterInfo();
     auto found = ranges::find_if(const_regs, [&](auto &r) {
-      return r.name == reg_info->getName(mop.getReg());
+      return r.name == reg_info.getName(mop.getReg());
     });
     if (found != const_regs.end()) {
       auto val = found->value;
@@ -788,12 +788,12 @@ static auto write_value_to_register(Value *val, MCRegister reg,
                                     const register_stats &reg_stats)
     -> Value * {
   auto *reg_addr = rmap.at(reg);
-  auto *reg_info = tmachine.getMCRegisterInfo();
+  auto reg_info = tmachine.getMCRegisterInfo();
   auto &const_regs = instrs.get_const_regs();
   auto const_regs_vals = std::unordered_map<unsigned, uint64_t>();
   ranges::transform(
       const_regs, std::inserter(const_regs_vals, const_regs_vals.end()),
-      [reg_info](auto &e) -> std::pair<unsigned, uint64_t> {
+      [&reg_info](auto &e) -> std::pair<unsigned, uint64_t> {
         auto special_reg = find_register_by_name(reg_info, e.name);
         if (!special_reg)
           throw std::runtime_error(
@@ -808,7 +808,7 @@ static auto write_value_to_register(Value *val, MCRegister reg,
   assert(rinfo);
   auto &rclass = reg_stats.get_register_class_for(reg);
   auto found = ranges::find_if(
-      const_regs, [&](auto &r) { return r.name == reg_info->getName(reg); });
+      const_regs, [&](auto &r) { return r.name == reg_info.getName(reg); });
   if (found != const_regs.end()) {
     return builder.CreateStore(
         ConstantInt::get(val->getContext(), APInt(rclass.get_register_size(),
@@ -875,7 +875,7 @@ static auto generate_call(const MachineInstr &minst, IRBuilder<> &builder,
 
 static std::optional<unsigned>
 get_stack_pointer(const instr_impl &instrs, const TargetMachine &tmachine) {
-  auto *reg_info = tmachine.getMCRegisterInfo();
+  auto reg_info = tmachine.getMCRegisterInfo();
   auto sp_reg = find_register_by_name(reg_info, instrs.get_stack_pointer());
   return sp_reg;
 }
