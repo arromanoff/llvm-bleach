@@ -2,18 +2,14 @@
 
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/StringExtras.h>
-#include <llvm/CodeGen/GlobalISel/GISelValueTracking.h>
-#include <llvm/CodeGen/GlobalISel/InstructionSelector.h>
-#include <llvm/CodeGen/MIRParser/MIRParser.h>
 #include <llvm/CodeGen/MIRPrinter.h>
 #include <llvm/CodeGen/MachineInstrBuilder.h>
-#include <llvm/CodeGen/TargetOpcodes.h>
-#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/MC/MCInstrAnalysis.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Object/ELFObjectFile.h>
 #include <llvm/Object/ObjectFile.h>
-#include <llvm/Support/CodeGenCoverage.h>
+#include <llvm/Support/Endian.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Target/TargetMachine.h>
@@ -22,7 +18,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <iostream>
 #include <set>
 #include <stdexcept>
 #include <string_view>
@@ -79,8 +74,6 @@ Error translator_t::create_module_and_function(StringRef triple_name,
   res.mod->setTargetTriple(the_triple);
 
   TargetOptions options;
-  // TODO(Ilyagavrilin): make TargetMachine initialization simpler or add more
-  // features
   res.tmachine.reset(the_target->createTargetMachine(
       the_triple, "", features.getString(), options, std::nullopt));
   if (!res.tmachine)
@@ -92,8 +85,8 @@ Error translator_t::create_module_and_function(StringRef triple_name,
   return Error::success();
 }
 
-Error translator_t::process_disassembly(SectionRef section,
-                                        StringRef contents) {
+Error translator_t::process_disassembly(SectionRef section, StringRef contents,
+                                        ArrayRef<SymbolRef> functions) {
   if (!res.tmachine || !tii || !tri || !tsi)
     return createStringError(inconvertibleErrorCode(),
                              "translator not properly initialized");
@@ -122,29 +115,39 @@ Error translator_t::process_disassembly(SectionRef section,
   if (!dis_asm)
     return createStringError(inconvertibleErrorCode(),
                              "Failed to create disassembler");
-  std::vector<SymbolRef> functions;
-  for (SymbolRef s : section.getObject()->symbols()) {
+  if (contents.size() > UINT64_MAX - section_addr)
+    return createStringError("executable section address overflow");
+  const uint64_t limit = section_addr + contents.size();
+  const size_t first = res.funcs.size();
+  for (SymbolRef s : functions) {
     auto name = s.getName();
-    auto type = s.getType();
-    auto addr = s.getValue();
-    if (name && type && addr && !name->empty() &&
-        (type.get() == SymbolRef::Type::ST_Function ||
-         type.get() == SymbolRef::Type::ST_Unknown)) {
-      auto *obj = s.getObject();
-      auto size = [&] {
-        if (isa<ELFObjectFileBase>(obj))
-          return ELFSymbolRef(s).getSize();
-        throw std::runtime_error("Unsupported object size");
-      }();
-      res.funcs.push_back(
-          translated_function{{}, {}, *addr, *addr + size, name->str()});
-    }
+    if (!name)
+      return name.takeError();
+    if (name->empty())
+      return createStringError("unnamed ELF function");
+    auto addr = s.getAddress();
+    if (!addr)
+      return addr.takeError();
+    const auto size = ELFSymbolRef(s).getSize();
+    if (*addr < section_addr || *addr >= limit || size > limit - *addr)
+      return createStringError("function range outside executable section: " +
+                               *name);
+    res.funcs.push_back({{}, {}, *addr, *addr + size, name->str()});
+    res.funcs.back().section_index = section.getIndex();
   }
-  ranges::sort(res.funcs, {}, &translated_function::start);
-
-  uint64_t size;
-  MCInst inst;
-  for (auto &&finfo : res.funcs) {
+  auto local = MutableArrayRef(res.funcs).drop_front(first);
+  ranges::sort(local, {}, &translated_function::start);
+  for (size_t i = 0; i < local.size(); ++i) {
+    auto &finfo = local[i];
+    uint64_t next = i + 1 == local.size() ? limit : local[i + 1].start;
+    if (finfo.start == next || finfo.end > next)
+      return createStringError("aliased or overlapping function: " +
+                               finfo.name);
+    // For a zero-size symbol, stop at the next function or the section end.
+    if (finfo.end == finfo.start)
+      finfo.end = next;
+    if (res.mod->getNamedValue(finfo.name))
+      return createStringError("duplicate function name: " + finfo.name);
     // FIXME: don't always return i64
     finfo.func =
         Function::Create(FunctionType::get(Type::getInt64Ty(ctx), false),
@@ -154,26 +157,39 @@ Error translator_t::process_disassembly(SectionRef section,
         MachineFunctionProperties::Property::TracksLiveness);
     for (size_t addr = finfo.start; addr < finfo.end;) {
       auto diff = addr - section_addr;
-      if (dis_asm->getInstruction(inst, size, bytes.slice(diff), addr,
-                                  errs())) {
-        finfo.insts.emplace_back(addr, inst);
-        addr += size;
-      } else {
-        errs() << "Illegal instruction at address: 0x" << utohexstr(addr)
-               << '\n';
-        addr += 1;
+      auto remaining = bytes.slice(diff, finfo.end - addr);
+      MCInst inst;
+      uint64_t size = 0;
+      auto status =
+          dis_asm->getInstruction(inst, size, remaining, addr, nulls());
+      if (status != MCDisassembler::Success || !size || size > remaining.size())
+        return createStringError(finfo.name + ": " +
+                                 (status == MCDisassembler::SoftFail
+                                      ? "soft-failed"
+                                      : "invalid or truncated") +
+                                 " instruction at 0x" + utohexstr(addr));
+      auto &record = finfo.insts.emplace_back(addr, inst);
+      record.section_offset = diff;
+      record.bytes.append(remaining.begin(), remaining.begin() + size);
+      uint64_t target;
+      if (res.mi_analysis->evaluateBranch(inst, addr, size, target)) {
+        record.target = target;
+        const auto &desc = tii->get(inst.getOpcode());
+        for (unsigned j = 0;
+             j < std::min<unsigned>(inst.size(), desc.getNumOperands()); ++j) {
+          const auto &op = desc.operands()[j];
+          if (inst.getOperand(j).isImm() &&
+              (op.isBranchTarget() || op.OperandType == MCOI::OPERAND_PCREL))
+            record.target_operand = j;
+        }
       }
+      addr += size;
     }
   }
   return Error::success();
 }
 
-Error translator_t::add_instruction(uint64_t, const MCInst &) {
-  return Error::success();
-}
-
 Error translator_t::finalize() {
-  // TODO(Ilyagavrilin): Rewrite this chain
   if (Error err = identify_basic_blocks())
     return err;
   if (Error err = create_machine_basic_blocks())
@@ -182,12 +198,10 @@ Error translator_t::finalize() {
     return err;
   if (Error err = link_machine_basic_blocks())
     return err;
-
   return Error::success();
 }
 
 Error translator_t::identify_basic_blocks() {
-  address_to_mbb.clear();
   std::set<uint64_t> leaders;
   for (auto &func : res.funcs) {
     leaders.clear();
@@ -195,17 +209,13 @@ Error translator_t::identify_basic_blocks() {
       leaders.insert(func.insts.front().address);
     for (size_t i = 0; i < func.insts.size(); ++i) {
       const translated_inst &tinst = func.insts[i];
-      uint64_t current_addr = tinst.address;
       const MCInst &inst = tinst.inst;
-      if (res.mi_analysis->isBranch(inst) || res.mi_analysis->isReturn(inst)) {
-        if (res.mi_analysis->isBranch(inst)) {
-          uint64_t target;
-          // TODO(Ilyagavrilin): it breaks on some corner cases, need to
-          // redesign
-          if (res.mi_analysis->evaluateBranch(inst, current_addr, 0, target)) {
-            leaders.insert(target);
-          }
-        }
+      if (res.mi_analysis->isBranch(inst) && tinst.target &&
+          *tinst.target >= func.start && *tinst.target < func.end) {
+        leaders.insert(*tinst.target);
+      }
+      if ((res.mi_analysis->isBranch(inst) ||
+           res.mi_analysis->isReturn(inst))) {
         if (i + 1 < func.insts.size()) {
           leaders.insert(func.insts[i + 1].address);
         }
@@ -216,7 +226,7 @@ Error translator_t::identify_basic_blocks() {
       uint64_t current_addr = tinst.address;
       if (leaders.count(current_addr) > 0) {
         if (current_block)
-          current_block->end_address = current_addr - 1;
+          current_block->end_address = current_addr;
 
         func.blocks.emplace_back(current_addr);
         current_block = &func.blocks.back();
@@ -233,7 +243,7 @@ Error translator_t::identify_basic_blocks() {
     if (!func.blocks.empty()) {
       const translated_inst &last_inst = func.insts.back();
       func.blocks.back().end_address =
-          last_inst.address + last_inst.inst.size();
+          last_inst.address + last_inst.bytes.size();
     }
   }
   return Error::success();
@@ -245,7 +255,7 @@ Error translator_t::create_machine_basic_blocks() {
       MachineBasicBlock *mbb = func.mfunc->CreateMachineBasicBlock();
       func.mfunc->push_back(mbb);
       block.mbb = mbb;
-      address_to_mbb[block.start_address] = mbb;
+      func.blocks_by_address[block.start_address] = mbb;
     }
   }
 
@@ -260,7 +270,12 @@ Error translator_t::translate_instructions() {
   for (auto &finfo : res.funcs) {
     for (auto &block : finfo.blocks) {
       for (auto *tinst : block.instrs) {
-        MachineInstr *minst = create_machine_instr(*tinst, block.mbb);
+        for (const auto &op : tinst->inst)
+          if (!op.isReg() && !op.isImm())
+            return createStringError("unsupported MC operand at 0x" +
+                                     utohexstr(tinst->address));
+        MachineInstr *minst = create_machine_instr(*tinst, finfo, block.mbb);
+        tinst->minst = minst;
         if (!minst)
           return createStringError(inconvertibleErrorCode(),
                                    "Failed to convert instruction at 0x%llx",
@@ -272,32 +287,8 @@ Error translator_t::translate_instructions() {
   return Error::success();
 }
 
-static bool is_tail_call(const MCInst &instr, const MachineBasicBlock *current,
-                         const MachineBasicBlock *target,
-                         const MCInstrAnalysis &mi_analysis) {
-  return mi_analysis.isUnconditionalBranch(instr) &&
-         target->getParent() != current->getParent();
-}
-static bool is_call(const MCInst &instr, const MachineBasicBlock *current,
-                    const MachineBasicBlock *target,
-                    const MCInstrAnalysis &mi_analysis) {
-  return mi_analysis.isCall(instr) ||
-         is_tail_call(instr, current, target, mi_analysis);
-}
-
-void translator_t::fill_operands(MachineInstrBuilder &builder,
-                                 const MCInst &inst, const MCInstrDesc &desc,
-                                 bool is_branch) {
-  for (unsigned i = 0; i < inst.getNumOperands(); ++i) {
-    if (is_branch && (i == inst.getNumOperands() - 1) &&
-        inst.getOperand(i).isImm())
-      break;
-    const MCOperand &mc_op = inst.getOperand(i);
-    add_operand_to_mib(builder, mc_op, i, desc);
-  }
-}
-
 MachineInstr *translator_t::create_machine_instr(const translated_inst &tinst,
+                                                 translated_function &func,
                                                  MachineBasicBlock *mbb) {
   if (!tii || !mbb)
     return nullptr;
@@ -305,42 +296,27 @@ MachineInstr *translator_t::create_machine_instr(const translated_inst &tinst,
   auto &inst = tinst.inst;
   unsigned opcode = inst.getOpcode();
   const MCInstrDesc &desc = tii->get(opcode);
-  uint64_t target;
-  bool is_branch = res.mi_analysis->evaluateBranch(inst, 0, 4, target);
-
-  if (is_branch) {
-    assert(inst.getNumOperands() > 0 &&
-           inst.getOperand(inst.getNumOperands() - 1).isImm());
-    auto target_it = address_to_mbb.find(target + tinst.address);
-    if (target_it != address_to_mbb.end()) {
-      if (mctomir::is_call(inst, mbb, target_it->second, *res.mi_analysis)) {
-        bool is_tail = mctomir::is_tail_call(inst, mbb, target_it->second,
-                                             *res.mi_analysis);
-
-        auto mib = is_tail ? BuildMI(*mbb, mbb->end(), DebugLoc(),
-                                     tii->get(TargetOpcode::G_BR))
-                           : BuildMI(*mbb, mbb->end(), DebugLoc(), desc);
-        if (!is_tail)
-          fill_operands(mib, inst, desc, is_branch);
-        mib.addGlobalAddress(&target_it->second->getParent()->getFunction(), 0);
-
-        return mib.getInstr();
+  auto mib = BuildMI(*mbb, mbb->end(), DebugLoc(), desc);
+  for (unsigned i = 0; i < inst.size(); ++i) {
+    if (tinst.target && i == tinst.target_operand) {
+      if (res.mi_analysis->isCall(inst)) {
+        const auto callee = llvm::find_if(res.funcs, [&](const auto &f) {
+          return f.start == *tinst.target &&
+                 f.section_index == func.section_index;
+        });
+        if (callee != res.funcs.end()) {
+          mib.addGlobalAddress(callee->func);
+          continue;
+        }
+      } else if (auto it = func.blocks_by_address.find(*tinst.target);
+                 it != func.blocks_by_address.end()) {
+        mib.addMBB(it->second);
+        mbb->addSuccessor(it->second);
+        continue;
       }
-      MachineInstrBuilder mib = BuildMI(*mbb, mbb->end(), DebugLoc(), desc);
-      fill_operands(mib, inst, desc, is_branch);
-      mib.addMBB(target_it->second);
-      mbb->addSuccessor(target_it->second);
-      return mib.getInstr();
     }
-    std::string instr;
-    raw_string_ostream ss(instr);
-    std::cerr << "Warning: destination not found for instruction:\n\t" << instr
-              << '\n';
+    add_operand_to_mib(mib, inst.getOperand(i), i, desc);
   }
-  MachineInstrBuilder mib = BuildMI(*mbb, mbb->end(), DebugLoc(), desc);
-
-  fill_operands(mib, inst, desc, is_branch);
-
   return mib.getInstr();
 }
 
@@ -352,31 +328,17 @@ void translator_t::add_operand_to_mib(MachineInstrBuilder &mib,
 
     bool is_def = op_idx < desc.getNumDefs();
 
-    if (is_def) {
-      // Add additional flags for better output
-      auto flags = RegState::Define;
-
-      mib.addReg(reg, flags);
-    } else {
-      auto flags = RegState::NoFlags;
-      // demo of killed instruction marking
-      // TODO(Ilyagavrilin): make killed operands analysis
-      if (op_idx == desc.getNumOperands() - 1) {
-        flags |= RegState::Kill;
-      }
-
-      mib.addReg(reg, flags);
-    }
+    mib.addReg(reg, is_def ? RegState::Define : RegState::NoFlags);
   } else if (mc_op.isImm()) {
     mib.addImm(mc_op.getImm());
   } else
     llvm_unreachable("Unsupported operand");
 }
 
-// TODO(Ilyagavrilin): Change linkage logic
 Error translator_t::link_machine_basic_blocks() {
   for (auto &finfo : res.funcs) {
-    for (size_t i = 0; i < finfo.blocks.size(); ++i) {
+    // The last block has no fallthrough within this function.
+    for (size_t i = 0; i + 1 < finfo.blocks.size(); ++i) {
       auto &block = finfo.blocks[i];
       MachineBasicBlock *mbb = block.mbb;
 
@@ -384,62 +346,16 @@ Error translator_t::link_machine_basic_blocks() {
         continue;
 
       auto *last_t_inst = block.instrs.back();
-      const MCInst &last_inst = last_t_inst->inst;
-      if (res.mi_analysis->isBranch(last_inst)) {
-        uint64_t target;
-        if (res.mi_analysis->evaluateBranch(last_inst, last_t_inst->address, 0,
-                                            target)) {
-          auto target_it = address_to_mbb.find(target);
-          if (target_it != address_to_mbb.end() &&
-              !mctomir::is_call(last_inst, mbb, target_it->second,
-                                *res.mi_analysis)) {
-            // mbb->addSuccessor(target_it->second);
-          } else {
-            [[maybe_unused]] MachineBasicBlock *target_mbb =
-                get_or_create_mbb_for_address(target, *finfo.mfunc);
-            // mbb->addSuccessor(target_mbb);
-          }
-        }
-        if (!res.mi_analysis->isUnconditionalBranch(last_inst) &&
-            i + 1 < finfo.blocks.size()) {
-          MachineBasicBlock *next_mbb = finfo.blocks[i + 1].mbb;
-          if (next_mbb) {
-            bool has_successor = false;
-            for (MachineBasicBlock *succ : mbb->successors()) {
-              if (succ == next_mbb) {
-                has_successor = true;
-                break;
-              }
-            }
-            if (!has_successor) {
-              mbb->addSuccessor(next_mbb);
-            }
-          }
-        }
-      } else if (res.mi_analysis->isReturn(last_inst)) {
-      } else if (i + 1 < finfo.blocks.size()) {
-        MachineBasicBlock *next_mbb = finfo.blocks[i + 1].mbb;
-        if (next_mbb) {
-          mbb->addSuccessor(next_mbb);
-        }
-      }
+      const auto *transfer = last_t_inst;
+      if (transfer && (res.mi_analysis->isUnconditionalBranch(transfer->inst) ||
+                       res.mi_analysis->isReturn(transfer->inst)))
+        continue;
+      auto *next = finfo.blocks[i + 1].mbb;
+      if (!mbb->isSuccessor(next))
+        mbb->addSuccessor(next);
     }
   }
   return Error::success();
-}
-
-MachineBasicBlock *
-translator_t::get_or_create_mbb_for_address(uint64_t address,
-                                            MachineFunction &mfunc) {
-  auto it = address_to_mbb.find(address);
-  if (it != address_to_mbb.end())
-    return it->second;
-
-  MachineBasicBlock *mbb = mfunc.CreateMachineBasicBlock();
-  mfunc.push_back(mbb);
-  address_to_mbb[address] = mbb;
-
-  return mbb;
 }
 
 static section_info::access get_access(SectionRef section) {
@@ -449,7 +365,6 @@ static section_info::access get_access(SectionRef section) {
   if (flags & (ELF::SHF_WRITE))
     acc = static_cast<section_info::access>(acc | section_info::access::w);
   return acc;
-  throw std::invalid_argument("Non-ELF sections are not suppo  rted");
 }
 
 void translator_t::set_section(StringRef name, StringRef contents,
@@ -537,23 +452,41 @@ Error elf_to_mir_converter::process_file(StringRef file_path) {
   return Error::success();
 }
 
-Error elf_to_mir_converter::convert_section(StringRef section_name) {
+Error elf_to_mir_converter::convert_sections() {
   if (!disassembler || !translator)
     return createStringError(inconvertibleErrorCode(),
                              "disassembler or translator not initialized");
 
-  SectionRef section;
-  if (Error err = loader.get_section_by_name(section_name, section))
-    return err;
-
-  Expected<StringRef> contents_or_err = loader.get_section_contents(section);
-  if (!contents_or_err)
-    return contents_or_err.takeError();
-
-  StringRef contents = contents_or_err.get();
-
-  if (Error err = translator->process_disassembly(section, contents))
-    return err;
+  auto obj = loader.get_elf_object();
+  if (!obj)
+    return obj.takeError();
+  std::map<uint64_t, std::vector<SymbolRef>> functions;
+  for (auto sym : (*obj)->symbols()) {
+    auto type = sym.getType();
+    if (!type)
+      return type.takeError();
+    if (*type != SymbolRef::ST_Function)
+      continue;
+    auto sec = sym.getSection();
+    if (!sec)
+      return sec.takeError();
+    if (*sec != (*obj)->section_end() && (**sec).isText())
+      functions[(**sec).getIndex()].push_back(sym);
+  }
+  if (functions.empty())
+    return createStringError(
+        "no defined ELF function symbols in executable sections");
+  for (auto section : (*obj)->sections()) {
+    auto it = functions.find(section.getIndex());
+    if (it == functions.end())
+      continue;
+    auto contents = section.getContents();
+    if (!contents)
+      return contents.takeError();
+    if (auto err =
+            translator->process_disassembly(section, *contents, it->second))
+      return err;
+  }
 
   if (Error err = translator->finalize())
     return err;
@@ -576,14 +509,13 @@ void elf_to_mir_converter::print_mir(raw_ostream &os) {
 
 translation_result lift_elf_file(LLVMContext &ctx,
                                  std::string_view input_filename) {
-  std::string section_name = ".text"; // For now hardcode text section
   elf_to_mir_converter converter(ctx);
 
   if (Error err = converter.process_file(input_filename))
     throw std::runtime_error("Failed to process file: " +
                              toString(std::move(err)));
 
-  if (Error err = converter.convert_section(section_name))
+  if (Error err = converter.convert_sections())
     throw std::runtime_error("Failed to convert section: " +
                              toString(std::move(err)));
   if (Error err = converter.read_sections())

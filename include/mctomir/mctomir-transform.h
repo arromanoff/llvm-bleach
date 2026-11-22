@@ -26,7 +26,9 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 
+#include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace mctomir {
@@ -37,7 +39,11 @@ struct translated_inst final {
   uint64_t address;    // Original address
   MCInst inst;         // MC instruction
   MachineInstr *minst; // Machine instruction (owned by MachineFunction)
-
+  SmallVector<uint8_t, 8> bytes;
+  uint64_t section_offset = 0; // Locates the bytes within the input section.
+  std::optional<uint64_t> target; // Absolute destination if MC resolved it.
+  // Only this MC operand can be replaced with a block or function reference.
+  std::optional<unsigned> target_operand;
   translated_inst(uint64_t addr, const MCInst &i)
       : address(addr), inst(i), minst(nullptr) {}
 };
@@ -60,6 +66,8 @@ struct translated_function final {
   std::string name;
   Function *func = nullptr;
   MachineFunction *mfunc = nullptr;
+  uint64_t section_index = 0;
+  std::map<uint64_t, MachineBasicBlock *> blocks_by_address;
 };
 
 struct section_info final {
@@ -74,10 +82,10 @@ struct section_info final {
 };
 
 struct translation_result final {
+  std::unique_ptr<TargetMachine> tmachine;
   std::unique_ptr<Module> mod;
   std::unique_ptr<MachineModuleInfo> mmi;
   std::vector<translated_function> funcs;
-  std::unique_ptr<TargetMachine> tmachine;
   std::unique_ptr<MCContext> mcctx;
   std::unique_ptr<MCInstrAnalysis> mi_analysis;
   std::vector<section_info> sections;
@@ -89,9 +97,9 @@ public:
 
   Error initialize(StringRef triple_name, SubtargetFeatures features);
 
-  Error process_disassembly(SectionRef section, StringRef contents);
-
-  Error add_instruction(uint64_t address, const MCInst &inst);
+  // `functions` contains only the function symbols defined in this section.
+  Error process_disassembly(SectionRef section, StringRef contents,
+                            ArrayRef<SymbolRef> functions);
 
   Error finalize();
 
@@ -112,8 +120,6 @@ private:
 
   LLVMContext &ctx;
   translation_result res;
-  std::map<uint64_t, MachineBasicBlock *> address_to_mbb;
-
   Error create_module_and_function(StringRef triple_name,
                                    SubtargetFeatures features);
   Error identify_basic_blocks();
@@ -121,21 +127,10 @@ private:
   Error translate_instructions();
   Error link_machine_basic_blocks();
 
-  MachineInstr *convert_to_machine_instr(const MCInst &inst, uint64_t address);
-  MachineOperand convert_operand(const MCOperand &op, const MCInst &inst);
-  bool is_terminator(const MCInst &inst);
-  bool is_branch(const MCInst &inst);
-  bool is_call(const MCInst &inst);
-  bool is_return(const MCInst &inst);
-  uint64_t get_branch_target(const MCInst &inst, uint64_t address,
-                             uint64_t size);
-  MachineBasicBlock *get_or_create_mbb_for_address(uint64_t address,
-                                                   MachineFunction &mfunc);
-  void fill_operands(MachineInstrBuilder &builder, const MCInst &inst,
-                     const MCInstrDesc &desc, bool is_branch);
   void add_operand_to_mib(MachineInstrBuilder &mib, const MCOperand &mc_op,
                           unsigned op_idx, const MCInstrDesc &desc);
   MachineInstr *create_machine_instr(const translated_inst &tinst,
+                                     translated_function &func,
                                      MachineBasicBlock *mbb);
 };
 
@@ -146,7 +141,7 @@ public:
         translator(std::make_unique<translator_t>(ctx)) {}
 
   Error process_file(StringRef file_path);
-  Error convert_section(StringRef section_name);
+  Error convert_sections();
   Error read_sections();
   Error write_mir(StringRef output_path);
   void print_mir(raw_ostream &os);

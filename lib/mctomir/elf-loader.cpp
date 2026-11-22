@@ -72,7 +72,7 @@ Error elf_loader::get_section_by_name(StringRef section_name,
   for (const SectionRef &sec : elf_obj->sections()) {
     Expected<StringRef> name_or_err = sec.getName();
     if (!name_or_err)
-      continue;
+      return name_or_err.takeError();
     if (name_or_err.get() == section_name) {
       section = sec;
       return Error::success();
@@ -164,21 +164,17 @@ Error elf_disassembler::initialize() {
                              "Failed to create MCRegisterInfo for %s",
                              triple_name.c_str());
 
-  // TODO(Ilyagavrilin): add CPU selection or remove this feature
   std::string cpu_name = "";
 
-  mai.reset(the_target->createMCAsmInfo(*mri, the_triple, MCTargetOptions()));
+  mai.reset(the_target->createMCAsmInfo(*mri, the_triple, options));
   if (!mai)
     return createStringError(inconvertibleErrorCode(),
                              "Failed to create MCAsmInfo for %s",
                              triple_name.c_str());
 
   Expected<SubtargetFeatures> features_or_err = get_disasm_features();
-  if (features_or_err.takeError()) {
-    return createStringError(inconvertibleErrorCode(),
-                             "Unable to get features for triple %s",
-                             triple_name.c_str());
-  }
+  if (!features_or_err)
+    return features_or_err.takeError();
   SubtargetFeatures features = features_or_err.get();
 
   sti.reset(the_target->createMCSubtargetInfo(the_triple, cpu_name,
@@ -296,14 +292,15 @@ Error elf_disassembler::disassemble_bytes(ArrayRef<uint8_t> bytes,
   }
 
   // Disassemble each instruction
-  uint64_t size;
-  MCInst inst;
-
   for (size_t index = 0; index < bytes.size();) {
+    uint64_t size = 0;
+    MCInst inst;
     os << format_hex(address, 10) << ": ";
 
-    if (dis_asm->getInstruction(inst, size, bytes.slice(index), address,
-                                nulls())) {
+    auto status = dis_asm->getInstruction(inst, size, bytes.slice(index),
+                                          address, nulls());
+    if (status == MCDisassembler::Success && size &&
+        size <= bytes.size() - index) {
       if (show_bytes) {
         for (size_t i = 0; i < size && (index + i) < bytes.size(); ++i)
           os << format_hex_no_prefix(bytes[index + i], 2) << " ";
@@ -319,13 +316,8 @@ Error elf_disassembler::disassemble_bytes(ArrayRef<uint8_t> bytes,
       index += size;
       address += size;
     } else {
-      // Invalid instruction - print one byte and continue
-      if (show_bytes)
-        os << format_hex_no_prefix(bytes[index], 2) << "                      ";
-
-      os << "<invalid>\n";
-      ++index;
-      ++address;
+      return createStringError("invalid or unsupported instruction at 0x" +
+                               utohexstr(address));
     }
   }
 
@@ -334,19 +326,14 @@ Error elf_disassembler::disassemble_bytes(ArrayRef<uint8_t> bytes,
 
 Expected<SubtargetFeatures> elf_disassembler::get_disasm_features() const {
   Expected<Triple> triple_or_err = loader.get_triple();
-  if (triple_or_err.takeError()) {
-    return createStringError(inconvertibleErrorCode(),
-                             "Unable to get target triple");
-  }
+  if (!triple_or_err)
+    return triple_or_err.takeError();
   Triple the_triple = triple_or_err.get();
   std::string the_triple_str = the_triple.normalize();
 
   Expected<SubtargetFeatures> features_or_err = loader.get_features();
-  if (features_or_err.takeError()) {
-    return createStringError(inconvertibleErrorCode(),
-                             "Unable to get features for triple %s",
-                             the_triple_str.c_str());
-  }
+  if (!features_or_err)
+    return features_or_err.takeError();
   SubtargetFeatures features = features_or_err.get();
 
   switch (the_triple.getArch()) {

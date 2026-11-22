@@ -73,6 +73,7 @@ private:
   const elf_loader &loader;
 
   // Disassembler components
+  MCTargetOptions options;
   std::unique_ptr<const MCRegisterInfo> mri;
   std::unique_ptr<const MCAsmInfo> mai;
   std::unique_ptr<const MCSubtargetInfo> sti;
