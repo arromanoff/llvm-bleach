@@ -26,6 +26,18 @@ namespace mctomir {
 using namespace llvm;
 namespace ranges = std::ranges;
 
+// TMS320 encoding/timing constants, not generic MC instruction properties.
+namespace c6 {
+static constexpr unsigned instruction_bytes = 4;
+// Aligned addresses have both low bits clear: 4 - 1 == 0b11.
+static constexpr uint64_t instruction_alignment_mask = instruction_bytes - 1;
+static constexpr uint64_t address_space_size = uint64_t{1} << 32;
+static constexpr unsigned max_packet_words = 8;
+static constexpr unsigned branch_delay_cycles = 5;
+static constexpr unsigned parallel_bit = 1; // p=1 links the following word.
+static constexpr unsigned functional_unit_mask = 15; // TMS320 TSFlags[3:0].
+} // namespace c6
+
 Error translator_t::initialize(StringRef triple_name,
                                SubtargetFeatures features) {
   if (Error err = create_module_and_function(triple_name, features))
@@ -85,6 +97,10 @@ Error translator_t::create_module_and_function(StringRef triple_name,
   return Error::success();
 }
 
+bool translator_t::is_c6() const {
+  return res.tmachine->getTargetTriple().getArchName() == "c6000";
+}
+
 Error translator_t::process_disassembly(SectionRef section, StringRef contents,
                                         ArrayRef<SymbolRef> functions) {
   if (!res.tmachine || !tii || !tri || !tsi)
@@ -118,6 +134,9 @@ Error translator_t::process_disassembly(SectionRef section, StringRef contents,
   if (contents.size() > UINT64_MAX - section_addr)
     return createStringError("executable section address overflow");
   const uint64_t limit = section_addr + contents.size();
+  if (is_c6() && limit > c6::address_space_size)
+    return createStringError(
+        "C67x+ executable section exceeds 32-bit address space");
   const size_t first = res.funcs.size();
   for (SymbolRef s : functions) {
     auto name = s.getName();
@@ -148,11 +167,17 @@ Error translator_t::process_disassembly(SectionRef section, StringRef contents,
       finfo.end = next;
     if (res.mod->getNamedValue(finfo.name))
       return createStringError("duplicate function name: " + finfo.name);
+    if (is_c6() && (finfo.start & c6::instruction_alignment_mask))
+      return createStringError("unaligned C67x+ function: " + finfo.name);
     // FIXME: don't always return i64
     finfo.func =
         Function::Create(FunctionType::get(Type::getInt64Ty(ctx), false),
                          Function::ExternalLinkage, finfo.name, *res.mod);
     finfo.mfunc = &res.mmi->getOrCreateMachineFunction(*finfo.func);
+    // llc skips declarations when reading MIR. This body is a container,
+    // not a lowering of the input code.
+    if (is_c6())
+      new UnreachableInst(ctx, BasicBlock::Create(ctx, "", finfo.func));
     finfo.mfunc->getProperties().reset(
         MachineFunctionProperties::Property::TracksLiveness);
     for (size_t addr = finfo.start; addr < finfo.end;) {
@@ -162,7 +187,8 @@ Error translator_t::process_disassembly(SectionRef section, StringRef contents,
       uint64_t size = 0;
       auto status =
           dis_asm->getInstruction(inst, size, remaining, addr, nulls());
-      if (status != MCDisassembler::Success || !size || size > remaining.size())
+      if (status != MCDisassembler::Success || !size ||
+          size > remaining.size() || (is_c6() && size != c6::instruction_bytes))
         return createStringError(finfo.name + ": " +
                                  (status == MCDisassembler::SoftFail
                                       ? "soft-failed"
@@ -198,13 +224,32 @@ Error translator_t::finalize() {
     return err;
   if (Error err = link_machine_basic_blocks())
     return err;
+  if (is_c6())
+    for (auto &func : res.funcs)
+      if (!func.mfunc->verify(nullptr, "C67x+ structural lift", &errs(), false))
+        return createStringError("machine verification failed for " +
+                                 func.name);
+
   return Error::success();
 }
 
 Error translator_t::identify_basic_blocks() {
+  // TMS320 needs serializable events in place of ordinary branch terminators.
+  if (is_c6()) {
+    for (unsigned i = 0; i < tii->getNumOpcodes(); ++i)
+      if (tii->getName(i).starts_with("C6_"))
+        pseudos[tii->getName(i).str()] = i;
+    for (auto name : {"C6_PACKET", "C6_ISSUE", "C6_COMMIT", "C6_COMMIT_COND",
+                      "C6_EXIT", "C6_EXIT_COND"})
+      if (!pseudos.count(name))
+        return createStringError("missing C67x+ lifter pseudo: %s", name);
+  }
   std::set<uint64_t> leaders;
   for (auto &func : res.funcs) {
     leaders.clear();
+    if (is_c6())
+      if (auto err = analyze_packets(func))
+        return err;
     if (!func.insts.empty())
       leaders.insert(func.insts.front().address);
     for (size_t i = 0; i < func.insts.size(); ++i) {
@@ -212,10 +257,20 @@ Error translator_t::identify_basic_blocks() {
       const MCInst &inst = tinst.inst;
       if (res.mi_analysis->isBranch(inst) && tinst.target &&
           *tinst.target >= func.start && *tinst.target < func.end) {
+        if (is_c6()) {
+          const auto &entry =
+              func.insts[(*tinst.target - func.start) / c6::instruction_bytes];
+          if (!entry.packet_words || entry.in_delay)
+            return createStringError(
+                "unsupported entry into packet or delay window at 0x" +
+                utohexstr(*tinst.target));
+        }
         leaders.insert(*tinst.target);
       }
-      if ((res.mi_analysis->isBranch(inst) ||
-           res.mi_analysis->isReturn(inst))) {
+      // TMS320 splits after transfer commit, not after branch issue.
+      if (is_c6() ? tinst.commit_issue != nullptr
+                  : (res.mi_analysis->isBranch(inst) ||
+                     res.mi_analysis->isReturn(inst))) {
         if (i + 1 < func.insts.size()) {
           leaders.insert(func.insts[i + 1].address);
         }
@@ -246,6 +301,72 @@ Error translator_t::identify_basic_blocks() {
           last_inst.address + last_inst.bytes.size();
     }
   }
+  return Error::success();
+}
+
+// TMS320 only. SPRU733A ch. 3 (B, NOP) and §4.4: a delay slot is a cycle,
+// independent of the number of words issued in parallel.
+Error translator_t::analyze_packets(translated_function &func) {
+  translated_inst *pending = nullptr;
+  unsigned delay = 0;
+  for (size_t i = 0; i < func.insts.size();) {
+    const size_t first = i;
+    unsigned cycles = 1;
+    translated_inst *issue = nullptr;
+    bool idle = false;
+    unsigned reserved_units = 0;
+    do {
+      if (i == func.insts.size() || i - first == c6::max_packet_words)
+        return createStringError(
+            "incomplete or oversized execute packet at 0x" +
+            utohexstr(func.insts[first].address));
+      auto &word = func.insts[i++];
+      word.in_delay = pending != nullptr;
+      const auto name = tii->getName(word.inst.getOpcode());
+      unsigned unit =
+          tii->get(word.inst.getOpcode()).TSFlags & c6::functional_unit_mask;
+      if (unit && (reserved_units & (1u << unit)))
+        return createStringError(
+            "functional unit used twice in execute packet at 0x" +
+            utohexstr(word.address));
+      reserved_units |= 1u << unit;
+      if (name == "NOP" || name == "NOP_P")
+        cycles = std::max(cycles, unsigned(word.inst.getOperand(0).getImm()));
+      idle |= name == "IDLE" || name == "IDLE_P";
+      if (res.mi_analysis->isBranch(word.inst)) {
+        if (pending || issue)
+          return createStringError("overlapping delayed branches at 0x" +
+                                   utohexstr(word.address));
+        issue = &word;
+      }
+    } while (func.insts[i - 1].bytes.front() & c6::parallel_bit);
+    if ((cycles > 1 && i - first > 1) || (idle && (pending || issue)))
+      return createStringError("unsupported packet timing at 0x" +
+                               utohexstr(func.insts[first].address));
+    func.insts[first].packet_words = i - first;
+    func.insts[first].packet_cycles = idle ? 0 : cycles;
+    if (pending) {
+      if (cycles > delay)
+        return createStringError("transfer inside multicycle NOP at 0x" +
+                                 utohexstr(func.insts[first].address));
+      delay -= cycles;
+      if (!delay) {
+        if (i == func.insts.size() &&
+            res.mi_analysis->isConditionalBranch(pending->inst))
+          return createStringError(
+              "conditional continuation outside function at 0x" +
+              utohexstr(pending->address));
+        func.insts[i - 1].commit_issue = pending;
+        pending = nullptr;
+      }
+    } else if (issue) {
+      pending = issue;
+      delay = c6::branch_delay_cycles;
+    }
+  }
+  if (pending)
+    return createStringError("incomplete branch delay window at 0x" +
+                             utohexstr(pending->address));
   return Error::success();
 }
 
@@ -296,9 +417,23 @@ MachineInstr *translator_t::create_machine_instr(const translated_inst &tinst,
   auto &inst = tinst.inst;
   unsigned opcode = inst.getOpcode();
   const MCInstrDesc &desc = tii->get(opcode);
-  auto mib = BuildMI(*mbb, mbb->end(), DebugLoc(), desc);
+  // TMS320-only emission: annotations are empty for immediate-transfer targets.
+  auto pseudo = [&](const char *name) {
+    return BuildMI(*mbb, mbb->end(), DebugLoc(), tii->get(pseudos.at(name)));
+  };
+  if (tinst.packet_words)
+    pseudo("C6_PACKET")
+        .addImm(func.section_index)
+        .addImm(tinst.address)
+        .addImm(tinst.packet_words)
+        .addImm(tinst.packet_cycles);
+  bool issue = is_c6() && desc.isBranch();
+  auto mib =
+      issue ? pseudo("C6_ISSUE") : BuildMI(*mbb, mbb->end(), DebugLoc(), desc);
+  if (issue)
+    mib.addImm(support::endian::read32le(tinst.bytes.data()));
   for (unsigned i = 0; i < inst.size(); ++i) {
-    if (tinst.target && i == tinst.target_operand) {
+    if (!issue && tinst.target && i == tinst.target_operand) {
       if (res.mi_analysis->isCall(inst)) {
         const auto callee = llvm::find_if(res.funcs, [&](const auto &f) {
           return f.start == *tinst.target &&
@@ -317,6 +452,24 @@ MachineInstr *translator_t::create_machine_instr(const translated_inst &tinst,
     }
     add_operand_to_mib(mib, inst.getOperand(i), i, desc);
   }
+  if (issue)
+    for (auto reg : desc.implicit_uses())
+      mib.addReg(reg, RegState::Implicit);
+  // TMS320 commit refers to the issue PC; it must not reread changed registers.
+  if (const auto *br = tinst.commit_issue) {
+    auto dst = br->target ? func.blocks_by_address.find(*br->target)
+                          : func.blocks_by_address.end();
+    bool conditional = res.mi_analysis->isConditionalBranch(br->inst);
+    if (dst != func.blocks_by_address.end()) {
+      pseudo(conditional ? "C6_COMMIT_COND" : "C6_COMMIT")
+          .addImm(br->address)
+          .addMBB(dst->second);
+      mbb->addSuccessor(dst->second);
+    } else {
+      pseudo(conditional ? "C6_EXIT_COND" : "C6_EXIT").addImm(br->address);
+    }
+  }
+
   return mib.getInstr();
 }
 
@@ -346,7 +499,8 @@ Error translator_t::link_machine_basic_blocks() {
         continue;
 
       auto *last_t_inst = block.instrs.back();
-      const auto *transfer = last_t_inst;
+      // TMS320 fallthrough depends on the committed branch, not the delay word.
+      const auto *transfer = is_c6() ? last_t_inst->commit_issue : last_t_inst;
       if (transfer && (res.mi_analysis->isUnconditionalBranch(transfer->inst) ||
                        res.mi_analysis->isReturn(transfer->inst)))
         continue;
@@ -477,6 +631,20 @@ Error elf_to_mir_converter::convert_sections() {
     return createStringError(
         "no defined ELF function symbols in executable sections");
   for (auto section : (*obj)->sections()) {
+    // TMS320 relocation handling is not implemented; don't resolve raw fixups.
+    if ((*obj)->getEMachine() == ELF::EM_TI_C6000 &&
+        section.relocation_begin() != section.relocation_end()) {
+      auto relocated = section.getRelocatedSection();
+      if (!relocated)
+        return relocated.takeError();
+      if (*relocated == (*obj)->section_end() || (**relocated).getIndex() == 0)
+        return createStringError(
+            "unsupported C67x+ unscoped relocation section");
+      if ((**relocated).isText())
+        return createStringError(
+            "unsupported C67x+ executable section relocation at 0x" +
+            utohexstr(section.relocation_begin()->getOffset()));
+    }
     auto it = functions.find(section.getIndex());
     if (it == functions.end())
       continue;
