@@ -1,12 +1,9 @@
 # RUN: %bin/llvm-bleach %S/inputs/foo.mir --lifted-prefix=bleached_ \
 # RUN:   --instructions=%S/inputs/addsub.yaml -noinline-instr | filecheck %s
 
-# CHECK: %register_state = type { [32 x i64], [1000 x i64] }
-
 # CHECK: define void @bleached_foo(ptr %0) {
 # CHECK: {{%[0-9]+}} = call i64 @ADDW(i64 {{%[0-9]+}}, i64 {{%[0-9]+}})
 # CHECK-NEXT:   {{%[0-9]+}} = call i64 @ADDW(i64 {{%[0-9]+}}, i64 {{%[0-9]+}})
 # CHECK-NEXT:   {{%[0-9]+}} = call i64 @SUBW(i64 {{%[0-9]+}}, i64 {{%[0-9]+}})
 # CHECK:   ret void
 # CHECK-NEXT: }
-

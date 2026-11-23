@@ -44,12 +44,14 @@ struct translated_inst final {
   std::optional<uint64_t> target; // Absolute destination if MC resolved it.
   // Only this MC operand can be replaced with a block or function reference.
   std::optional<unsigned> target_operand;
+#ifdef MCTOMIR_ENABLE_TMS320
   // TMS320-only packet/timing annotations; unused by other targets.
   unsigned packet_words = 0; // Packet length, set only on its first word.
   unsigned packet_cycles = 0; // Issue cycles at packet start; zero for IDLE.
   // On the last delay word, points back to the branch that issued the transfer.
   translated_inst *commit_issue = nullptr;
   bool in_delay = false; // A transfer is pending here; reject direct entry.
+#endif
 
   translated_inst(uint64_t addr, const MCInst &i)
       : address(addr), inst(i), minst(nullptr) {}
@@ -128,6 +130,7 @@ private:
   LLVMContext &ctx;
   translation_result res;
 
+#ifdef MCTOMIR_ENABLE_TMS320
   // TMS320-specific policy and state, kept together for later extraction.
   bool is_c6() const;
   // C6_* pseudo names -> backend opcode IDs, discovered from TargetInstrInfo.
@@ -136,6 +139,7 @@ private:
   // Group p-bit-linked words and locate commits after five delay cycles.
   // Annotates decoded records before CFG construction; rejects unmodeled timing.
   Error analyze_packets(translated_function &func);
+#endif
 
   Error create_module_and_function(StringRef triple_name,
                                    SubtargetFeatures features);

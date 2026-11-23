@@ -18,6 +18,23 @@
         "type": "github"
       }
     },
+    "llvm-project": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1795380051,
+        "narHash": "sha256-u5nNOhUvT+9ybfK9bNm3YSSNtXj0ikcc+g96xR8Hswo=",
+        "owner": "arromanoff",
+        "repo": "llvm-project",
+        "rev": "4b22a7662d42fb7ee8ccfa356f6a2d57aac4c988",
+        "type": "github"
+      },
+      "original": {
+        "owner": "arromanoff",
+        "ref": "tms320",
+        "repo": "llvm-project",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1788614874,
@@ -52,6 +69,7 @@
     "root": {
       "inputs": {
         "flake-parts": "flake-parts",
+        "llvm-project": "llvm-project",
         "nixpkgs": "nixpkgs",
         "snippy": "snippy",
         "treefmt-nix": "treefmt-nix"

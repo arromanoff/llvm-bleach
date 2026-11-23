@@ -55,6 +55,7 @@ stdenv.mkDerivation {
     pandoc
   ];
   strictDeps = true;
+  cmakeFlags = [ "-DMCTOMIR_ENABLE_TMS320=ON" ];
   enableShared = false;
   nativeCheckInputs = [
     lit

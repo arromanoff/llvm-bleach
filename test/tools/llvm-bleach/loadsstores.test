@@ -5,11 +5,11 @@
 # CHECK: define void @bleached_SnippyFunction(ptr %0) {
 # CHECK: %[[SP:[0-9]+]] = call i64 @ADDI(i64 %{{[0-9]+}}, i64 6)
 # CHECK: %[[IDX:[0-9]+]] = add i64 %[[SP]], -5
-# CHECK: %[[STACK:[0-9]+]] = getelementptr %register_state, ptr %0, i32 0, i32 1
-# CHECK: %[[ADDR:[0-9]+]] = getelementptr inbounds [1000 x i64], ptr %[[STACK]], i32 0, i64 %[[IDX]]
+# CHECK: %[[STACK:[0-9]+]] = getelementptr i8, ptr %0, i64 256
+# CHECK: %[[ADDR:[0-9]+]] = getelementptr inbounds [8 x i8], ptr %[[STACK]], i64 %[[IDX]]
 # CHECK: %[[LOADED:[0-9]+]] = load i64, ptr %[[ADDR]]
 
 # CHECK: %[[IDX2:[0-9]+]] = add i64 %[[SP]], -3
-# CHECK: %[[STACK2:[0-9]+]] = getelementptr %register_state, ptr %0, i32 0, i32 1
-# CHECK: %[[ADDR2:[0-9]+]] = getelementptr inbounds [1000 x i64], ptr %[[STACK2]], i32 0, i64 %[[IDX2]]
+# CHECK: %[[STACK2:[0-9]+]] = getelementptr i8, ptr %0, i64 256
+# CHECK: %[[ADDR2:[0-9]+]] = getelementptr inbounds [8 x i8], ptr %[[STACK2]], i64 %[[IDX2]]
 # CHECK: store i64 %[[LOADED]], ptr %[[ADDR2]]

@@ -2,13 +2,10 @@
 # RUN:   --instructions=%S/inputs/logical.yaml -noinline-instr \
 # RUN:   --lifted-prefix=bleached_ | FileCheck %s
 
-# CHECK: %register_state = type { [32 x i64], [1000 x i64] }
-
 # CHECK: define void @bleached_foo(ptr %0) {
 # CHECK: {{%[0-9]+}} = call i64 @ADDW(i64 {{%[0-9]+}}, i64 {{%[0-9]+}})
 # CHECK:   {{%[0-9]+}} = call i64 @SUBW(i64 {{%[0-9]+}}, i64 {{%[0-9]+}})
-# CHECK: [[X0ADDR:%[0-9]+]] = getelementptr inbounds [32 x i64], ptr %GPR1, i32 0, i32 0
+# CHECK: [[X0ADDR:%[0-9]+]] = getelementptr inbounds i8, ptr %GPR1, i64 0
 # CHECK-NEXT: store i64 0, ptr [[X0ADDR]]
 # CHECK:   ret void
 # CHECK-NEXT: }
-

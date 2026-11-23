@@ -2,7 +2,7 @@
 # RUN:   --instructions=%S/inputs/logical.yaml --lifted-prefix=bleached_| FileCheck %s
 
 # CHECK: define void @bleached_SnippyFunction(ptr %0) {
-# CHECK-NEXT:   %GPR = getelementptr %register_state, ptr %0, i32 0, i32 0
+# CHECK-NEXT:   %GPR = getelementptr i8, ptr %0, i64 0
 # CHECK-32:     {{%[0-9]+}} = load i64, ptr {{%[0-9]+}}, align 8
 # CHECK:   br label %[[BLOCK1:[0-9]+]]
 # CHECK: [[BLOCK1]]:
@@ -24,6 +24,6 @@
 # CHECK:   icmp eq
 # CHECK:   br i1 {{%[0-9]+}}, label %[[BLOCK7]], label %[[BLOCK7]]
 # CHECK: [[BLOCK7]]:
-# CHECK:   %GPR1 = getelementptr %register_state, ptr %0, i32 0, i32 0
+# CHECK:   %GPR1 = getelementptr i8, ptr %0, i64 0
 # CHECK-32:   store i64 {{%[0-9]+}}, ptr {{%[0-9]+}}, align 8
 # CHECK:   ret void

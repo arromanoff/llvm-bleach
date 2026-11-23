@@ -3,7 +3,7 @@
 # RUN:   --lifted-prefix=bleached_ | FileCheck %s
 
 # CHECK: define void @bleached_foo(ptr %0) {
-# CHECK-NEXT:   %GPR = getelementptr %register_state, ptr %0, i32 0, i32 0
+# CHECK-NEXT:   %GPR = getelementptr i8, ptr %0, i64 0
 # CHECK:   br label %[[BLOCK1:[0-9]+]]
 # CHECK: [[BLOCK1]]:
 # CHECK:   ret void

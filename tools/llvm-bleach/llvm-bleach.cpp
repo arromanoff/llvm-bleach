@@ -149,7 +149,7 @@ static cl::opt<output_type_t> output_type("t", cl::desc("Output type:"),
 
 namespace {
 
-class print_pass : public PassInfoMixin<print_pass> {
+class print_pass : public RequiredPassInfoMixin<print_pass> {
 public:
   PreservedAnalyses run(Module &m, ModuleAnalysisManager &mam) {
     auto &mmi = mam.getResult<MachineModuleAnalysis>(m).getMMI();
@@ -203,7 +203,7 @@ input_mir read_or_translate_mir(const std::filesystem::path &input_file,
     if (triple.getTriple().empty()) {
       triple.setTriple(sys::getDefaultTargetTriple());
     }
-    auto tm = codegen::createTargetMachineForTriple(triple);
+    auto tm = codegen::createTargetMachineForTriple(ctx.getLibraryOptions(), triple);
     if (auto err = tm.takeError())
       throw std::runtime_error(toString(std::move(err)));
     target_machine = std::unique_ptr<TargetMachine>(
@@ -222,9 +222,6 @@ input_mir read_or_translate_mir(const std::filesystem::path &input_file,
           .mmi = std::move(machine_module_info)};
 }
 
-// remove to get read of uinitialized global
-codegen::RegisterCodeGenFlags cfg;
-
 } // namespace
 } // namespace bleach
 using namespace bleach;
@@ -235,14 +232,15 @@ auto main(int argc, char **argv) -> int try {
   llvm::setBugReportMsg("PLEASE submit a bug report to "
                         "https://github.com/ajlekcahdp4/llvm-bleach/issues and "
                         "include the crash backtrace.\n");
-  cl::ParseCommandLineOptions(argc, argv, "llvm-bleach");
+  LLVMContext ctx;
+  cl::parseCommandLineOptions(ctx.getLibraryOptions(), codegen::getToolOptions(),
+                             ArrayRef(argv, argc), "llvm-bleach");
   InitLLVM llvm_stacktrace(argc, argv);
   InitializeAllTargetInfos();
   InitializeAllTargets();
   InitializeAllTargetMCs();
   InitializeAllAsmPrinters();
   InitializeAllDisassemblers();
-  LLVMContext ctx;
   auto input_mir = read_or_translate_mir(input_file_name.getValue(), ctx);
   auto &[m, target_machine, machine_module_info, funcs, sections] = input_mir;
   assert(machine_module_info);
@@ -282,7 +280,7 @@ auto main(int argc, char **argv) -> int try {
   CGSCCAnalysisManager cgam;
 
   ModulePassManager mpm;
-  PassBuilder pass_builder;
+  PassBuilder pass_builder(ctx);
   // remove to get nullptr dereference
   pass_builder.registerModuleAnalyses(mam);
   pass_builder.registerFunctionAnalyses(fam);

@@ -2,12 +2,12 @@
 # RUN:   --instructions=%S/inputs/logical.yaml -noinline-instr | FileCheck %s
 
 # CHECK: define void @bleached_foo(ptr %0) {
-# CHECK-NEXT:   %GPR = getelementptr %register_state, ptr %0, i32 0, i32 0
-# CHECK:   [[X10ADDR:%[0-9]+]] = getelementptr inbounds [32 x i64], ptr %GPR, i32 0, i32 10
+# CHECK-NEXT:   %GPR = getelementptr i8, ptr %0, i64 0
+# CHECK:   [[X10ADDR:%[0-9]+]] = getelementptr inbounds i8, ptr %GPR, i64 80
 # CHECK-NEXT:   [[X10:%[0-9]+]] = load i64, ptr [[X10ADDR]], align 8
-# CHECK:   [[X11ADDR:%[0-9]+]] = getelementptr inbounds [32 x i64], ptr %GPR, i32 0, i32 11
+# CHECK:   [[X11ADDR:%[0-9]+]] = getelementptr inbounds i8, ptr %GPR, i64 88
 # CHECK-NEXT:   [[X11:%[0-9]+]] = load i64, ptr [[X11ADDR]], align 8
-# CHECK:   [[X12ADDR:%[0-9]+]] = getelementptr inbounds [32 x i64], ptr %GPR, i32 0, i32 12
+# CHECK:   [[X12ADDR:%[0-9]+]] = getelementptr inbounds i8, ptr %GPR, i64 96
 # CHECK-NEXT:   [[X12:%[0-9]+]] = load i64, ptr [[X12ADDR]], align 8
 
 # CHECK:   [[X12_1:%[0-9]+]] = call i64 @XOR(i64 [[X12]], i64 [[X10]])
@@ -17,12 +17,12 @@
 # CHECK-NEXT:   [[X10_1:%[0-9]+]] = call i64 @OR(i64 [[X11_1]], i64 [[X10]])
 # CHECK-NEXT:   [[X10_2:%[0-9]+]] = call i64 @SUB(i64 [[X12_2]], i64 [[X10_1]])
 
-# CHECK:   %GPR1 = getelementptr %register_state, ptr %0, i32 0, i32
-# CHECK:   [[X10DEST:%[0-9]+]] = getelementptr inbounds [32 x i64], ptr %GPR1, i32 0, i32 10
+# CHECK:   %GPR1 = getelementptr i8, ptr %0, i64 0
+# CHECK:   [[X10DEST:%[0-9]+]] = getelementptr inbounds i8, ptr %GPR1, i64 80
 # CHECK-NEXT:   store i64 [[X10_2]], ptr [[X10DEST]], align 8
-# CHECK:   [[X11DEST:%[0-9]+]] = getelementptr inbounds [32 x i64], ptr %GPR1, i32 0, i32 11
+# CHECK:   [[X11DEST:%[0-9]+]] = getelementptr inbounds i8, ptr %GPR1, i64 88
 # CHECK-NEXT:   store i64 [[X11_1]], ptr [[X11DEST]], align 8
-# CHECK:   [[X12DEST:%[0-9]+]] = getelementptr inbounds [32 x i64], ptr %GPR1, i32 0, i32 12
+# CHECK:   [[X12DEST:%[0-9]+]] = getelementptr inbounds i8, ptr %GPR1, i64 96
 # CHECK-NEXT:   store i64 [[X12_2]], ptr [[X12DEST]], align 8
-# CHECK:   [[X13DEST:%[0-9]+]] = getelementptr inbounds [32 x i64], ptr %GPR1, i32 0, i32 13
+# CHECK:   [[X13DEST:%[0-9]+]] = getelementptr inbounds i8, ptr %GPR1, i64 104
 # CHECK-NEXT:   store i64 [[X13]], ptr [[X13DEST]], align 8

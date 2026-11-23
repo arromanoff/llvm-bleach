@@ -60,12 +60,14 @@ Expected<Triple> elf_loader::get_triple() const {
   if (!elf_obj)
     return createStringError(inconvertibleErrorCode(),
                              "No ELF file has been loaded");
+#ifdef MCTOMIR_ENABLE_TMS320
   // TMS320 backend contract: only little-endian C67x+ ELF32 is supported.
   if (elf_obj->getEMachine() == ELF::EM_TI_C6000) {
     if (!isa<ELF32LEObjectFile>(elf_obj))
       return createStringError("C67x+ requires little-endian ELF32");
     return Triple("c6000-unknown-elf");
   }
+#endif
   return elf_obj->makeTriple();
 }
 
@@ -342,9 +344,11 @@ Expected<SubtargetFeatures> elf_disassembler::get_disasm_features() const {
     return features_or_err.takeError();
   SubtargetFeatures features = features_or_err.get();
 
+#ifdef MCTOMIR_ENABLE_TMS320
   // TMS320 uses the object's features without extra architecture defaults.
   if (the_triple.getArchName() == "c6000")
     return features;
+#endif
   switch (the_triple.getArch()) {
   case llvm::Triple::riscv64:
   case llvm::Triple::riscv32:

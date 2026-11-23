@@ -4,12 +4,16 @@
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/CodeGen/MIRPrinter.h>
 #include <llvm/CodeGen/MachineInstrBuilder.h>
+#ifdef MCTOMIR_ENABLE_TMS320
 #include <llvm/IR/Instructions.h>
+#endif
 #include <llvm/MC/MCInstrAnalysis.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Object/ELFObjectFile.h>
 #include <llvm/Object/ObjectFile.h>
+#ifdef MCTOMIR_ENABLE_TMS320
 #include <llvm/Support/Endian.h>
+#endif
 #include <llvm/Support/Error.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Target/TargetMachine.h>
@@ -26,6 +30,7 @@ namespace mctomir {
 using namespace llvm;
 namespace ranges = std::ranges;
 
+#ifdef MCTOMIR_ENABLE_TMS320
 // TMS320 encoding/timing constants, not generic MC instruction properties.
 namespace c6 {
 static constexpr unsigned instruction_bytes = 4;
@@ -37,6 +42,7 @@ static constexpr unsigned branch_delay_cycles = 5;
 static constexpr unsigned parallel_bit = 1; // p=1 links the following word.
 static constexpr unsigned functional_unit_mask = 15; // TMS320 TSFlags[3:0].
 } // namespace c6
+#endif
 
 Error translator_t::initialize(StringRef triple_name,
                                SubtargetFeatures features) {
@@ -97,9 +103,11 @@ Error translator_t::create_module_and_function(StringRef triple_name,
   return Error::success();
 }
 
+#ifdef MCTOMIR_ENABLE_TMS320
 bool translator_t::is_c6() const {
   return res.tmachine->getTargetTriple().getArchName() == "c6000";
 }
+#endif
 
 Error translator_t::process_disassembly(SectionRef section, StringRef contents,
                                         ArrayRef<SymbolRef> functions) {
@@ -134,9 +142,11 @@ Error translator_t::process_disassembly(SectionRef section, StringRef contents,
   if (contents.size() > UINT64_MAX - section_addr)
     return createStringError("executable section address overflow");
   const uint64_t limit = section_addr + contents.size();
+#ifdef MCTOMIR_ENABLE_TMS320
   if (is_c6() && limit > c6::address_space_size)
     return createStringError(
         "C67x+ executable section exceeds 32-bit address space");
+#endif
   const size_t first = res.funcs.size();
   for (SymbolRef s : functions) {
     auto name = s.getName();
@@ -167,17 +177,21 @@ Error translator_t::process_disassembly(SectionRef section, StringRef contents,
       finfo.end = next;
     if (res.mod->getNamedValue(finfo.name))
       return createStringError("duplicate function name: " + finfo.name);
+#ifdef MCTOMIR_ENABLE_TMS320
     if (is_c6() && (finfo.start & c6::instruction_alignment_mask))
       return createStringError("unaligned C67x+ function: " + finfo.name);
+#endif
     // FIXME: don't always return i64
     finfo.func =
         Function::Create(FunctionType::get(Type::getInt64Ty(ctx), false),
                          Function::ExternalLinkage, finfo.name, *res.mod);
     finfo.mfunc = &res.mmi->getOrCreateMachineFunction(*finfo.func);
+#ifdef MCTOMIR_ENABLE_TMS320
     // llc skips declarations when reading MIR. This body is a container,
     // not a lowering of the input code.
     if (is_c6())
       new UnreachableInst(ctx, BasicBlock::Create(ctx, "", finfo.func));
+#endif
     finfo.mfunc->getProperties().reset(
         MachineFunctionProperties::Property::TracksLiveness);
     for (size_t addr = finfo.start; addr < finfo.end;) {
@@ -187,8 +201,11 @@ Error translator_t::process_disassembly(SectionRef section, StringRef contents,
       uint64_t size = 0;
       auto status =
           dis_asm->getInstruction(inst, size, remaining, addr, nulls());
-      if (status != MCDisassembler::Success || !size ||
-          size > remaining.size() || (is_c6() && size != c6::instruction_bytes))
+      bool invalid_size = !size || size > remaining.size();
+#ifdef MCTOMIR_ENABLE_TMS320
+      invalid_size |= is_c6() && size != c6::instruction_bytes;
+#endif
+      if (status != MCDisassembler::Success || invalid_size)
         return createStringError(finfo.name + ": " +
                                  (status == MCDisassembler::SoftFail
                                       ? "soft-failed"
@@ -224,16 +241,19 @@ Error translator_t::finalize() {
     return err;
   if (Error err = link_machine_basic_blocks())
     return err;
+#ifdef MCTOMIR_ENABLE_TMS320
   if (is_c6())
     for (auto &func : res.funcs)
       if (!func.mfunc->verify(nullptr, "C67x+ structural lift", &errs(), false))
         return createStringError("machine verification failed for " +
                                  func.name);
+#endif
 
   return Error::success();
 }
 
 Error translator_t::identify_basic_blocks() {
+#ifdef MCTOMIR_ENABLE_TMS320
   // TMS320 needs serializable events in place of ordinary branch terminators.
   if (is_c6()) {
     for (unsigned i = 0; i < tii->getNumOpcodes(); ++i)
@@ -244,12 +264,15 @@ Error translator_t::identify_basic_blocks() {
       if (!pseudos.count(name))
         return createStringError("missing C67x+ lifter pseudo: %s", name);
   }
+#endif
   std::set<uint64_t> leaders;
   for (auto &func : res.funcs) {
     leaders.clear();
+#ifdef MCTOMIR_ENABLE_TMS320
     if (is_c6())
       if (auto err = analyze_packets(func))
         return err;
+#endif
     if (!func.insts.empty())
       leaders.insert(func.insts.front().address);
     for (size_t i = 0; i < func.insts.size(); ++i) {
@@ -257,6 +280,7 @@ Error translator_t::identify_basic_blocks() {
       const MCInst &inst = tinst.inst;
       if (res.mi_analysis->isBranch(inst) && tinst.target &&
           *tinst.target >= func.start && *tinst.target < func.end) {
+#ifdef MCTOMIR_ENABLE_TMS320
         if (is_c6()) {
           const auto &entry =
               func.insts[(*tinst.target - func.start) / c6::instruction_bytes];
@@ -265,12 +289,17 @@ Error translator_t::identify_basic_blocks() {
                 "unsupported entry into packet or delay window at 0x" +
                 utohexstr(*tinst.target));
         }
+#endif
         leaders.insert(*tinst.target);
       }
+      bool ends_block = res.mi_analysis->isBranch(inst) ||
+                        res.mi_analysis->isReturn(inst);
+#ifdef MCTOMIR_ENABLE_TMS320
       // TMS320 splits after transfer commit, not after branch issue.
-      if (is_c6() ? tinst.commit_issue != nullptr
-                  : (res.mi_analysis->isBranch(inst) ||
-                     res.mi_analysis->isReturn(inst))) {
+      if (is_c6())
+        ends_block = tinst.commit_issue != nullptr;
+#endif
+      if (ends_block) {
         if (i + 1 < func.insts.size()) {
           leaders.insert(func.insts[i + 1].address);
         }
@@ -304,6 +333,7 @@ Error translator_t::identify_basic_blocks() {
   return Error::success();
 }
 
+#ifdef MCTOMIR_ENABLE_TMS320
 // TMS320 only. SPRU733A ch. 3 (B, NOP) and §4.4: a delay slot is a cycle,
 // independent of the number of words issued in parallel.
 Error translator_t::analyze_packets(translated_function &func) {
@@ -370,6 +400,8 @@ Error translator_t::analyze_packets(translated_function &func) {
   return Error::success();
 }
 
+#endif // MCTOMIR_ENABLE_TMS320
+
 Error translator_t::create_machine_basic_blocks() {
   for (auto &func : res.funcs) {
     for (auto &block : func.blocks) {
@@ -417,6 +449,7 @@ MachineInstr *translator_t::create_machine_instr(const translated_inst &tinst,
   auto &inst = tinst.inst;
   unsigned opcode = inst.getOpcode();
   const MCInstrDesc &desc = tii->get(opcode);
+#ifdef MCTOMIR_ENABLE_TMS320
   // TMS320-only emission: annotations are empty for immediate-transfer targets.
   auto pseudo = [&](const char *name) {
     return BuildMI(*mbb, mbb->end(), DebugLoc(), tii->get(pseudos.at(name)));
@@ -432,8 +465,15 @@ MachineInstr *translator_t::create_machine_instr(const translated_inst &tinst,
       issue ? pseudo("C6_ISSUE") : BuildMI(*mbb, mbb->end(), DebugLoc(), desc);
   if (issue)
     mib.addImm(support::endian::read32le(tinst.bytes.data()));
+#else
+  auto mib = BuildMI(*mbb, mbb->end(), DebugLoc(), desc);
+#endif
+  bool replace_target = tinst.target.has_value();
+#ifdef MCTOMIR_ENABLE_TMS320
+  replace_target &= !issue;
+#endif
   for (unsigned i = 0; i < inst.size(); ++i) {
-    if (!issue && tinst.target && i == tinst.target_operand) {
+    if (replace_target && i == tinst.target_operand) {
       if (res.mi_analysis->isCall(inst)) {
         const auto callee = llvm::find_if(res.funcs, [&](const auto &f) {
           return f.start == *tinst.target &&
@@ -452,6 +492,7 @@ MachineInstr *translator_t::create_machine_instr(const translated_inst &tinst,
     }
     add_operand_to_mib(mib, inst.getOperand(i), i, desc);
   }
+#ifdef MCTOMIR_ENABLE_TMS320
   if (issue)
     for (auto reg : desc.implicit_uses())
       mib.addReg(reg, RegState::Implicit);
@@ -470,6 +511,7 @@ MachineInstr *translator_t::create_machine_instr(const translated_inst &tinst,
     }
   }
 
+#endif
   return mib.getInstr();
 }
 
@@ -499,8 +541,12 @@ Error translator_t::link_machine_basic_blocks() {
         continue;
 
       auto *last_t_inst = block.instrs.back();
+      const auto *transfer = last_t_inst;
+#ifdef MCTOMIR_ENABLE_TMS320
       // TMS320 fallthrough depends on the committed branch, not the delay word.
-      const auto *transfer = is_c6() ? last_t_inst->commit_issue : last_t_inst;
+      if (is_c6())
+        transfer = last_t_inst->commit_issue;
+#endif
       if (transfer && (res.mi_analysis->isUnconditionalBranch(transfer->inst) ||
                        res.mi_analysis->isReturn(transfer->inst)))
         continue;
@@ -631,6 +677,7 @@ Error elf_to_mir_converter::convert_sections() {
     return createStringError(
         "no defined ELF function symbols in executable sections");
   for (auto section : (*obj)->sections()) {
+#ifdef MCTOMIR_ENABLE_TMS320
     // TMS320 relocation handling is not implemented; don't resolve raw fixups.
     if ((*obj)->getEMachine() == ELF::EM_TI_C6000 &&
         section.relocation_begin() != section.relocation_end()) {
@@ -645,6 +692,7 @@ Error elf_to_mir_converter::convert_sections() {
             "unsupported C67x+ executable section relocation at 0x" +
             utohexstr(section.relocation_begin()->getOffset()));
     }
+#endif
     auto it = functions.find(section.getIndex());
     if (it == functions.end())
       continue;

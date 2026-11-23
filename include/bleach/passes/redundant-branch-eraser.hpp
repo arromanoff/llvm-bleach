@@ -6,7 +6,7 @@
 namespace bleach::lifter {
 using namespace llvm;
 
-class redundant_branch_eraser : public PassInfoMixin<redundant_branch_eraser> {
+class redundant_branch_eraser : public OptionalPassInfoMixin<redundant_branch_eraser> {
 public:
   redundant_branch_eraser() = default;
   PreservedAnalyses run(Function &m, FunctionAnalysisManager &fam);

@@ -11,14 +11,19 @@
 # RUN: FileCheck %s --check-prefix RV32C --input-file %t.rv32.h
 
 
-# RV64IR:  %register_state = type { [32 x i64], [1000 x i64] }
+# LLVM 24 prints byte-offset GEPs, so the otherwise unused struct type is omitted.
+# RV64IR: %GPR = getelementptr i8, ptr %0, i64 0
+# RV64IR: getelementptr inbounds i8, ptr %GPR, i64 248
+# RV64IR-NEXT: {{%[0-9]+}} = load i64,
 
 # RV64C: struct register_state {
 # RV64C-NEXT: int64_t GPR[32];
 # RV64C-NEXT: int64_t stack[1000];
 # RV64C-NEXT: }
 
-# RV32IR:  %register_state = type { [32 x i32], [1000 x i32] }
+# RV32IR: %GPR = getelementptr i8, ptr %0, i32 0
+# RV32IR: getelementptr inbounds i8, ptr %GPR, i32 124
+# RV32IR-NEXT: {{%[0-9]+}} = load i32,
 # RV32C: struct register_state {
 # RV32C-NEXT: int32_t GPR[32];
 # RV32C-NEXT: int32_t stack[1000];

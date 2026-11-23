@@ -1,0 +1,41 @@
+# REQUIRES: tms320
+# RUN: %llvm/yaml2obj %S/inputs/c67x.yaml -o %t.o
+# RUN: %bin/mctomir %t.o -o %t.mir
+# RUN: %llvm/llc -run-pass=none -verify-machineinstrs %t.mir -o %t.rt.mir
+# RUN: %llvm/llc -run-pass=none -verify-machineinstrs %t.rt.mir -o - | FileCheck %s
+
+# CHECK-LABEL: name: loop
+# CHECK: bb.0:
+# CHECK-NEXT: successors: {{.*}}%bb.0{{.*}}%bb.1
+# CHECK: C6_PACKET {{[0-9]+}}, 288, 2, 1
+# CHECK-NEXT: $a16 = MVK_S1 -1, 1
+# CHECK-NEXT: $b30 = ADD_L2X_PRED $b0, 0, $b31, $a16, 0
+# CHECK: C6_ISSUE {{[0-9]+}}, $b0, 0, 0, 5, 0
+# CHECK: $b0 = MVK_S2 1, 0
+# CHECK: NOP 4
+# CHECK-NEXT: C6_COMMIT_COND 296, %bb.0
+# CHECK: bb.1:
+# CHECK: $a5_a4, $b2 = LDDW_MODE15_D2T1 $b2, $b3, 0, implicit $amr
+# CHECK: $a2 = STB_MODE11_D1T2 $b4, $a2, 3, 0, implicit $amr
+# CHECK-LABEL: name: indirect
+# CHECK: C6_ISSUE {{[0-9]+}}, $b3, 0, 5
+# CHECK: $b3 = ADDK_S2 $b3, -2, 0
+# CHECK: NOP 4
+# CHECK-NEXT: C6_EXIT 288
+# CHECK-LABEL: name: forward
+# CHECK: bb.0:
+# CHECK-NEXT: successors: %bb.2({{[^)]+}}){{$}}
+# CHECK: C6_PACKET {{[0-9]+}}, 284, 2, 1
+# CHECK-NEXT: NOP_P 1
+# CHECK-NEXT: $b4 = MVC_READ_S2 $csr, 0
+# CHECK: C6_ISSUE {{[0-9]+}}, 0, 5, 5
+# CHECK: C6_COMMIT 292, %bb.2
+# CHECK: bb.1:
+# CHECK: $a1 = LDW_LONG_B14_T1 100, 0, implicit $b14
+# CHECK: $a3 = ADD_L1_PRED $a1, 1, $a1, $a2, 0
+# CHECK: bb.2:
+# CHECK: C6_ISSUE {{[0-9]+}}, 0, 5, -2
+# CHECK: C6_EXIT 308
+# CHECK-LABEL: name: irq
+# CHECK: C6_ISSUE {{[0-9]+}}, $a1, 1, 0, 5, implicit $nrp
+# CHECK: C6_EXIT_COND 0

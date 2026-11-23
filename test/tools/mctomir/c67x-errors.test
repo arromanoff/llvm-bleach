@@ -1,0 +1,2 @@
+# REQUIRES: tms320
+# RUN: python3 %S/inputs/check-c67x-errors.py %llvm/yaml2obj %bin/mctomir %t

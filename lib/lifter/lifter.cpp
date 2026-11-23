@@ -802,7 +802,7 @@ static auto write_value_to_register(Value *val, MCRegister reg,
         return {*special_reg, e.value};
       });
   auto *stinfo =
-      tmachine.getSubtargetImpl(*builder.saveIP().getBlock()->getParent());
+      tmachine.getSubtargetImpl(*builder.GetInsertBlock()->getParent());
   assert(stinfo);
   auto *rinfo = stinfo->getRegisterInfo();
   assert(rinfo);
@@ -825,7 +825,7 @@ static auto read_register_value(MCRegister reg, const TargetMachine &tmachine,
   auto *reg_addr = rmap.at(reg);
   auto &ctx = builder.getContext();
   auto *stinfo =
-      tmachine.getSubtargetImpl(*builder.saveIP().getBlock()->getParent());
+      tmachine.getSubtargetImpl(*builder.GetInsertBlock()->getParent());
   assert(stinfo);
   auto *rinfo = stinfo->getRegisterInfo();
   assert(rinfo);
