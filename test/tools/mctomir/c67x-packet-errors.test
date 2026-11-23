@@ -1,0 +1,84 @@
+# REQUIRES: tms320
+# RUN: rm -rf %t
+# RUN: %llvm/split-file %s %t
+# Manual-derived packet compositions: SPRU733A ch. 3 B/NOP/IDLE and §4.4.
+
+# p=1 requires another word in the same execute packet.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=01000000 -o %t/incomplete.o
+# RUN: not %bin/mctomir %t/incomplete.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=PACKET
+# RUN: test ! -e %t/out.mir
+
+# Nine parallel NOP words exceed the eight-word execute-packet limit.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=010000000100000001000000010000000100000001000000010000000100000000000000 -o %t/oversized.o
+# RUN: not %bin/mctomir %t/oversized.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=PACKET
+# RUN: test ! -e %t/out.mir
+# PACKET: incomplete or oversized execute packet at 0x0
+
+# Two MVK.S1 instructions cannot issue together (SPRU733A §3.7.1).
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=A9FF7F08A8FF7F08 -o %t/unit.o
+# RUN: not %bin/mctomir %t/unit.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=UNIT
+# RUN: test ! -e %t/out.mir
+# UNIT: functional unit used twice in execute packet at 0x4
+
+# No words remain to fill the five delay cycles.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=10000000 -o %t/delay.o
+# RUN: not %bin/mctomir %t/delay.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=DELAY
+# RUN: test ! -e %t/out.mir
+# DELAY: incomplete branch delay window at 0x0
+
+# A second branch is unsupported both in a delay window and in the issue packet.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=1000000010000000 -o %t/nested.o
+# RUN: not %bin/mctomir %t/nested.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=OVERLAP
+# RUN: test ! -e %t/out.mir
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=1100000012000000 -o %t/parallel.o
+# RUN: not %bin/mctomir %t/parallel.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=OVERLAP
+# RUN: test ! -e %t/out.mir
+# OVERLAP: overlapping delayed branches at 0x4
+
+# NOP 9 would be interrupted by transfer commit; this timing is not modeled.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=1000000000000100 -o %t/nop9.o
+# RUN: not %bin/mctomir %t/nop9.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=NOP
+# RUN: test ! -e %t/out.mir
+# NOP: transfer inside multicycle NOP at 0x4
+
+# Branch targets may not enter a delay window or the middle of a packet.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=9000000000800000 -o %t/delay-entry.o
+# RUN: not %bin/mctomir %t/delay-entry.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=ENTRY
+# RUN: test ! -e %t/out.mir
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=01000000000000009000000000800000 -o %t/packet-entry.o
+# RUN: not %bin/mctomir %t/packet-entry.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=ENTRY
+# RUN: test ! -e %t/out.mir
+# ENTRY: unsupported entry into packet or delay window at 0x4
+
+# A conditional branch needs an in-function not-taken continuation.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=1000002000800000 -o %t/conditional.o
+# RUN: not %bin/mctomir %t/conditional.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=CONTINUATION
+# RUN: test ! -e %t/out.mir
+# CONTINUATION: conditional continuation outside function at 0x0
+
+# IDLE in a delay window and multicycle parallel NOPs have unsupported timing.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=1000000000E00100 -o %t/idle.o
+# RUN: not %bin/mctomir %t/idle.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=IDLE
+# RUN: test ! -e %t/out.mir
+# IDLE: unsupported packet timing at 0x4
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=0180000000000000 -o %t/parallel-nop.o
+# RUN: not %bin/mctomir %t/parallel-nop.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=PARALLEL-NOP
+# RUN: test ! -e %t/out.mir
+# PARALLEL-NOP: unsupported packet timing at 0x0
+
+#--- input.yaml
+--- !ELF
+FileHeader:
+  Class: ELFCLASS32
+  Data: ELFDATA2LSB
+  Type: ET_REL
+  Machine: EM_TI_C6000
+Sections:
+  - Name: .text
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
+    Content: "[[CONTENT]]"
+Symbols:
+  - Name: f
+    Type: STT_FUNC
+    Section: .text

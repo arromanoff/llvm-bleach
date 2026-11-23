@@ -1,0 +1,22 @@
+# Encoding provenance: llvm/test/MC/Disassembler/TMS320/{extended,mvkh,
+# addk,mpydp,long-memory,nop}.txt. Common C6700 forms validated there with
+# TI CGT 8.3.15; predicate bits follow SPRU733A ch. 3.
+# This is a structural operand fixture, not a scheduled executable program.
+!ELF
+FileHeader:
+  Class: ELFCLASS32
+  Data: ELFDATA2LSB
+  Type: ET_EXEC
+  Machine: EM_TI_C6000
+Sections:
+  - Name: .text
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
+    Address: 0x1000
+    Content: 58A00B0218A40B02681A892052FFFF0100070822FA3208926C648020BCFA0002A213900000000100
+Symbols:
+  - Name: operands
+    Type: STT_FUNC
+    Section: .text
+    Value: 0x1000
+    Size: 40

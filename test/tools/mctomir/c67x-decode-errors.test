@@ -1,0 +1,37 @@
+# REQUIRES: tms320
+# RUN: rm -rf %t
+# RUN: %llvm/split-file %s %t
+
+# A partial word at section end must not be silently skipped.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=000000 -DSIZE=0 -o %t/truncated.o
+# RUN: not %bin/mctomir %t/truncated.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=DECODE
+# RUN: test ! -e %t/out.mir
+
+# Reserved load addressing mode 2 (backend extended-invalid.txt).
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=26640802 -DSIZE=0 -o %t/unsupported.o
+# RUN: not %bin/mctomir %t/unsupported.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=DECODE
+# RUN: test ! -e %t/out.mir
+
+# A complete word in the section is still truncated by a three-byte function.
+# RUN: %llvm/yaml2obj %t/input.yaml -DCONTENT=00000000 -DSIZE=3 -o %t/bounded.o
+# RUN: not %bin/mctomir %t/bounded.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=DECODE
+# RUN: test ! -e %t/out.mir
+# DECODE: ERROR: Failed to convert section: f: invalid or truncated instruction at 0x0
+
+#--- input.yaml
+--- !ELF
+FileHeader:
+  Class: ELFCLASS32
+  Data: ELFDATA2LSB
+  Type: ET_REL
+  Machine: EM_TI_C6000
+Sections:
+  - Name: .text
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
+    Content: "[[CONTENT]]"
+Symbols:
+  - Name: f
+    Type: STT_FUNC
+    Section: .text
+    Size: [[SIZE]]

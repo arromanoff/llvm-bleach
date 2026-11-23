@@ -1,0 +1,31 @@
+# REQUIRES: tms320
+# RUN: %llvm/yaml2obj %S/inputs/c67x-operands.yaml -o %t.o
+# RUN: %bin/mctomir %t.o -o %t.mir
+# RUN: %bin/mctomir %t.o -o %t.again.mir
+# RUN: diff %t.mir %t.again.mir
+# RUN: %llvm/llc -run-pass=none -verify-machineinstrs %t.mir -o %t.rt.mir
+# RUN: %llvm/llc -run-pass=none -verify-machineinstrs %t.rt.mir -o - | FileCheck %s
+
+# Check exact operands, including tied old destinations and implicit base uses.
+# CHECK-LABEL: name: operands
+# CHECK: tracksRegLiveness: false
+# CHECK: C6_PACKET 1, 4096, 1, 1
+# CHECK-NEXT: $a4 = ADD_IMM_L1 -3, $a2, 0
+# CHECK: C6_PACKET 1, 4100, 1, 1
+# CHECK-NEXT: $a5_a4 = ADD_LONG_IMM_L1 -3, $a3_a2, 0
+# CHECK: C6_PACKET 1, 4104, 1, 1
+# CHECK-NEXT: $a1 = MVKH_S1_PRED $b0, 0, $a1, 4660, 0
+# CHECK: C6_PACKET 1, 4108, 1, 1
+# CHECK-NEXT: $b3 = ADDK_S2 $b3, -2, 0
+# CHECK: C6_PACKET 1, 4112, 1, 1
+# CHECK-NEXT: $a5_a4 = MPYDP_M1_PRED $b0, 0, $a1_a0, $a3_a2, 0
+# CHECK: C6_PACKET 1, 4116, 1, 1
+# CHECK-NEXT: $b4 = SUB_L2X_SRC1_PRED $a1, 1, $a1, $b2, 0
+# CHECK: C6_PACKET 1, 4120, 1, 1
+# CHECK-NEXT: $a1 = LDW_LONG_B14_T1_PRED $b0, 0, 100, 0, implicit $b14{{$}}
+# CHECK: C6_PACKET 1, 4124, 1, 1
+# CHECK-NEXT: STB_LONG_B15_T1 $a4, 250, 0, implicit $b15{{$}}
+# CHECK: C6_PACKET 1, 4128, 1, 1
+# CHECK-NEXT: $csr = MVC_WRITE_S2X $a4, 0
+# CHECK: C6_PACKET 1, 4132, 1, 9
+# CHECK-NEXT: NOP 9

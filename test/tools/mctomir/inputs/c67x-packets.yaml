@@ -1,0 +1,55 @@
+# Manual-derived packet composition, SPRU733A ch. 3 B/MVC/NOP/IDLE and §4.4.
+# Encoding words are from the backend's control-flow.txt, nop.txt and extended.txt.
+!ELF
+FileHeader:
+  Class: ELFCLASS32
+  Data: ELFDATA2LSB
+  Type: ET_REL
+  Machine: EM_TI_C6000
+Sections:
+  - Name: .text.parallel
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
+    Address: 0x120
+    Content: 11000000E2030402010000000000000000600000
+  - Name: .text.functions
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
+    Address: 0x200
+    Content: 100100000080000000E00100
+  - Name: .text.irp
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
+    Content: E200180000800000
+  # Even STT_FUNC must not turn non-executable bytes into instructions.
+  - Name: .data
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_WRITE]
+    Content: FFFFFFFF
+Symbols:
+  - Name: parallel_branch
+    Type: STT_FUNC
+    Section: .text.parallel
+    Size: 20
+  - Name: external
+    Type: STT_FUNC
+    Section: .text.functions
+  - Name: next_function
+    Type: STT_FUNC
+    Section: .text.functions
+    Value: 8
+  - Name: irp
+    Type: STT_FUNC
+    Section: .text.irp
+  - Name: data_symbol
+    Type: STT_FUNC
+    Section: .data
+    Size: 4
+  - Name: undefined_function
+    Type: STT_FUNC
+    Binding: STB_GLOBAL
+  # Untyped labels inside functions must not split their decode ranges.
+  - Name: local_label
+    Type: STT_NOTYPE
+    Section: .text.parallel
+    Value: 4

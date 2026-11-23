@@ -1,0 +1,114 @@
+# REQUIRES: tms320
+# RUN: rm -rf %t
+# RUN: %llvm/split-file %s %t
+
+# An explicit extent cannot extend beyond the section.
+# RUN: %llvm/yaml2obj %t/functions.yaml -DCONTENT=00000000 -DSIZE=8 -DNEXT=4 -o %t/range.o
+# RUN: not %bin/mctomir %t/range.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=RANGE
+# RUN: test ! -e %t/out.mir
+# RANGE: function range outside executable section: f
+
+# Aliases and partially overlapping function ranges are rejected.
+# RUN: %llvm/yaml2obj %t/functions.yaml -DCONTENT=00000000 -DSIZE=0 -DNEXT=0 -o %t/alias.o
+# RUN: not %bin/mctomir %t/alias.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=OVERLAP
+# RUN: test ! -e %t/out.mir
+# RUN: %llvm/yaml2obj %t/functions.yaml -DCONTENT=0000000000000000 -DSIZE=8 -DNEXT=4 -o %t/overlap.o
+# RUN: not %bin/mctomir %t/overlap.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=OVERLAP
+# RUN: test ! -e %t/out.mir
+# OVERLAP: aliased or overlapping function:
+
+# Neither explicit nor inferred extents may borrow the next function's NOP 5
+# to complete this branch's delay window (SPRU733A ch. 3 B/NOP).
+# RUN: %llvm/yaml2obj %t/functions.yaml -DCONTENT=1000000000800000 -DSIZE=4 -DNEXT=4 -o %t/explicit.o
+# RUN: not %bin/mctomir %t/explicit.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=DELAY
+# RUN: test ! -e %t/out.mir
+# RUN: %llvm/yaml2obj %t/functions.yaml -DCONTENT=1000000000800000 -DSIZE=0 -DNEXT=4 -o %t/inferred.o
+# RUN: not %bin/mctomir %t/inferred.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=DELAY
+# RUN: test ! -e %t/out.mir
+# DELAY: incomplete branch delay window at 0x0
+
+# Relocated instruction bytes must not be interpreted as final targets.
+# RUN: %llvm/yaml2obj %t/relocation.yaml -o %t/relocation.o
+# RUN: not %bin/mctomir %t/relocation.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=RELOCATION
+# RUN: test ! -e %t/out.mir
+# RELOCATION: unsupported C67x+ executable section relocation at 0x0
+
+# Format and address checks precede instruction decoding.
+# RUN: %llvm/yaml2obj %t/format.yaml -DCLASS=ELFCLASS32 -DDATA=ELFDATA2LSB -DADDRESS=1 -DCONTENT=00000000 -o %t/unaligned.o
+# RUN: not %bin/mctomir %t/unaligned.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=ALIGNMENT
+# RUN: test ! -e %t/out.mir
+# ALIGNMENT: unaligned C67x+ function: f
+# RUN: %llvm/yaml2obj %t/format.yaml -DCLASS=ELFCLASS32 -DDATA=ELFDATA2LSB -DADDRESS=0xFFFFFFFC -DCONTENT=0000000000000000 -o %t/overflow.o
+# RUN: not %bin/mctomir %t/overflow.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=OVERFLOW
+# RUN: test ! -e %t/out.mir
+# OVERFLOW: C67x+ executable section exceeds 32-bit address space
+# RUN: %llvm/yaml2obj %t/format.yaml -DCLASS=ELFCLASS32 -DDATA=ELFDATA2MSB -DADDRESS=0 -DCONTENT=00000000 -o %t/big-endian.o
+# RUN: not %bin/mctomir %t/big-endian.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=FORMAT
+# RUN: test ! -e %t/out.mir
+# RUN: %llvm/yaml2obj %t/format.yaml -DCLASS=ELFCLASS64 -DDATA=ELFDATA2LSB -DADDRESS=0 -DCONTENT=00000000 -o %t/elf64.o
+# RUN: not %bin/mctomir %t/elf64.o -o %t/out.mir 2>&1 | FileCheck %s --check-prefix=FORMAT
+# RUN: test ! -e %t/out.mir
+# FORMAT: C67x+ requires little-endian ELF32
+
+#--- functions.yaml
+--- !ELF
+FileHeader:
+  Class: ELFCLASS32
+  Data: ELFDATA2LSB
+  Type: ET_REL
+  Machine: EM_TI_C6000
+Sections:
+  - Name: .text
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
+    Content: "[[CONTENT]]"
+Symbols:
+  - Name: f
+    Type: STT_FUNC
+    Section: .text
+    Size: [[SIZE]]
+  - Name: other
+    Type: STT_FUNC
+    Section: .text
+    Value: [[NEXT]]
+
+#--- relocation.yaml
+--- !ELF
+FileHeader:
+  Class: ELFCLASS32
+  Data: ELFDATA2LSB
+  Type: ET_REL
+  Machine: EM_TI_C6000
+Sections:
+  - Name: .text
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
+    Content: "1000000000800000"
+  - Name: .rel.text
+    Type: SHT_REL
+    Info: .text
+    Link: .symtab
+    Relocations:
+      - {Offset: 0, Symbol: f, Type: 1}
+Symbols:
+  - Name: f
+    Type: STT_FUNC
+    Section: .text
+
+#--- format.yaml
+--- !ELF
+FileHeader:
+  Class: [[CLASS]]
+  Data: [[DATA]]
+  Type: ET_REL
+  Machine: EM_TI_C6000
+Sections:
+  - Name: .text
+    Type: SHT_PROGBITS
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
+    Address: [[ADDRESS]]
+    Content: "[[CONTENT]]"
+Symbols:
+  - Name: f
+    Type: STT_FUNC
+    Section: .text

@@ -1,0 +1,43 @@
+# REQUIRES: tms320
+# RUN: %llvm/yaml2obj %S/inputs/c67x-packets.yaml -o %t.o
+# RUN: %bin/mctomir %t.o -o %t.mir
+# RUN: %llvm/llc -run-pass=none -verify-machineinstrs %t.mir -o %t.rt.mir
+# RUN: %llvm/llc -run-pass=none -verify-machineinstrs %t.rt.mir -o - | FileCheck %s --implicit-check-not='name: data_symbol' --implicit-check-not='name: undefined_function' --implicit-check-not='name: local_label'
+
+# Branch is the first word of a parallel packet. Its companion and the two
+# parallel delay words must not each consume a delay cycle: commit is at 0x130.
+# CHECK-LABEL: name: parallel_branch
+# CHECK: bb.0:
+# CHECK-NEXT: successors: %bb.0({{[^)]+}}){{$}}
+# CHECK: C6_PACKET 1, 288, 2, 1
+# CHECK-NEXT: C6_ISSUE 17, 1, 5, 0
+# CHECK-NEXT: $b4 = MVC_READ_S2 $csr, 0
+# CHECK-NEXT: C6_PACKET 1, 296, 2, 1
+# CHECK-NEXT: NOP_P 1
+# CHECK-NEXT: NOP 1
+# CHECK-NEXT: C6_PACKET 1, 304, 1, 4
+# CHECK-NEXT: NOP 4
+# CHECK-NEXT: C6_COMMIT 288, %bb.0
+# CHECK-NOT: bb.1:
+
+# A zero-size function stops at the next function, even if its delay would
+# otherwise continue there. Here both functions are complete. The external
+# branch points exactly at the second function but must not acquire its MBB.
+# CHECK-LABEL: name: external
+# CHECK: bb.0:
+# CHECK-NOT: successors:
+# CHECK: C6_ISSUE 272, 0, 5, 2
+# CHECK-NEXT: C6_PACKET 2, 516, 1, 5
+# CHECK-NEXT: NOP 5
+# CHECK-NEXT: C6_EXIT 512
+# CHECK-NOT: bb.1:
+# CHECK-LABEL: name: next_function
+# CHECK: C6_PACKET 2, 520, 1, 0
+# CHECK-NEXT: IDLE
+# CHECK-NOT: C6_EXIT
+
+# An unconditional interrupt return keeps its implicit target register.
+# CHECK-LABEL: name: irp
+# CHECK: C6_ISSUE 1573090, 0, 5, implicit $irp{{$}}
+# CHECK: NOP 5
+# CHECK-NEXT: C6_EXIT 0
