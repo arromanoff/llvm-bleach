@@ -40,13 +40,13 @@ struct translated_inst final {
   MCInst inst;         // MC instruction
   MachineInstr *minst; // Machine instruction (owned by MachineFunction)
   SmallVector<uint8_t, 8> bytes;
-  uint64_t section_offset = 0; // Locates the bytes within the input section.
+  uint64_t section_offset = 0;    // Locates the bytes within the input section.
   std::optional<uint64_t> target; // Absolute destination if MC resolved it.
   // Only this MC operand can be replaced with a block or function reference.
   std::optional<unsigned> target_operand;
 #ifdef MCTOMIR_ENABLE_TMS320
   // TMS320-only packet/timing annotations; unused by other targets.
-  unsigned packet_words = 0; // Packet length, set only on its first word.
+  unsigned packet_words = 0;  // Packet length, set only on its first word.
   unsigned packet_cycles = 0; // Issue cycles at packet start; zero for IDLE.
   // On the last delay word, points back to the branch that issued the transfer.
   translated_inst *commit_issue = nullptr;
@@ -137,7 +137,8 @@ private:
   // Used to serialize packet boundaries and branch issue/commit events in MIR.
   std::map<std::string, unsigned> pseudos;
   // Group p-bit-linked words and locate commits after five delay cycles.
-  // Annotates decoded records before CFG construction; rejects unmodeled timing.
+  // Annotates decoded records before CFG construction; rejects unmodeled
+  // timing.
   Error analyze_packets(translated_function &func);
 #endif
 

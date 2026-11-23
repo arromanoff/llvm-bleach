@@ -203,7 +203,8 @@ input_mir read_or_translate_mir(const std::filesystem::path &input_file,
     if (triple.getTriple().empty()) {
       triple.setTriple(sys::getDefaultTargetTriple());
     }
-    auto tm = codegen::createTargetMachineForTriple(ctx.getLibraryOptions(), triple);
+    auto tm =
+        codegen::createTargetMachineForTriple(ctx.getLibraryOptions(), triple);
     if (auto err = tm.takeError())
       throw std::runtime_error(toString(std::move(err)));
     target_machine = std::unique_ptr<TargetMachine>(
@@ -233,8 +234,9 @@ auto main(int argc, char **argv) -> int try {
                         "https://github.com/ajlekcahdp4/llvm-bleach/issues and "
                         "include the crash backtrace.\n");
   LLVMContext ctx;
-  cl::parseCommandLineOptions(ctx.getLibraryOptions(), codegen::getToolOptions(),
-                             ArrayRef(argv, argc), "llvm-bleach");
+  cl::parseCommandLineOptions(ctx.getLibraryOptions(),
+                              codegen::getToolOptions(), ArrayRef(argv, argc),
+                              "llvm-bleach");
   InitLLVM llvm_stacktrace(argc, argv);
   InitializeAllTargetInfos();
   InitializeAllTargets();

@@ -68,7 +68,8 @@ auto parse_mir(LLVMContext &ctx) {
     if (triple.getTriple().empty()) {
       triple.setTriple(sys::getDefaultTargetTriple());
     }
-    auto tm = codegen::createTargetMachineForTriple(ctx.getLibraryOptions(), triple);
+    auto tm =
+        codegen::createTargetMachineForTriple(ctx.getLibraryOptions(), triple);
     if (auto err_tm = tm.takeError())
       throw std::runtime_error(toString(std::move(err_tm)));
     target_machine = std::unique_ptr<TargetMachine>(

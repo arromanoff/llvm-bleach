@@ -9,7 +9,8 @@
 namespace bleach::lifter {
 using namespace llvm;
 
-class block_ir_builder_pass : public RequiredPassInfoMixin<block_ir_builder_pass> {
+class block_ir_builder_pass
+    : public RequiredPassInfoMixin<block_ir_builder_pass> {
   const instr_impl &instrs;
   std::vector<mctomir::translated_function> funcs;
   std::vector<mctomir::section_info> sections;

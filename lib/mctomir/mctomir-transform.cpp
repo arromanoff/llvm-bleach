@@ -292,8 +292,8 @@ Error translator_t::identify_basic_blocks() {
 #endif
         leaders.insert(*tinst.target);
       }
-      bool ends_block = res.mi_analysis->isBranch(inst) ||
-                        res.mi_analysis->isReturn(inst);
+      bool ends_block =
+          res.mi_analysis->isBranch(inst) || res.mi_analysis->isReturn(inst);
 #ifdef MCTOMIR_ENABLE_TMS320
       // TMS320 splits after transfer commit, not after branch issue.
       if (is_c6())

@@ -2,7 +2,7 @@
 # Updating memory instructions: TI CGT 8.3.15 -mv6700 extended-memory.asm
 # in llvm/test/MC/Disassembler/TMS320/Inputs. Overlapping section addresses
 # in ET_REL deliberately exercise function-local target resolution.
---- !ELF
+!ELF
 FileHeader:
   Class: ELFCLASS32
   Data: ELFDATA2LSB
@@ -11,22 +11,22 @@ FileHeader:
 Sections:
   - Name: .text.loop
     Type: SHT_PROGBITS
-    Flags: [ SHF_ALLOC, SHF_EXECINSTR ]
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
     Address: 0x120
     Content: A9FF7F087AF0432F10000020AA00000000600000E47F080236760802
   - Name: .text.indirect
     Type: SHT_PROGBITS
-    Flags: [ SHF_ALLOC, SHF_EXECINSTR ]
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
     Address: 0x120
     Content: 62030C0052FFFF0100600000
   - Name: .text.forward
     Type: SHT_PROGBITS
-    Flags: [ SHF_ALLOC, SHF_EXECINSTR ]
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
     Address: 0x11c
     Content: 01000000E203040290020000008000006C6480007820889110FFFF0F00800000
   - Name: .text.irq
     Type: SHT_PROGBITS
-    Flags: [ SHF_ALLOC, SHF_EXECINSTR ]
+    Flags: [SHF_ALLOC, SHF_EXECINSTR]
     Content: E2001C900080000000000000
 Symbols:
   - Name: loop
